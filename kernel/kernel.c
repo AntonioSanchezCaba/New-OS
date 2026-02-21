@@ -1,10 +1,19 @@
 /*
- * kernel/kernel.c - Kernel main entry point
+ * kernel/kernel.c - Aether OS Kernel Entry Point
  *
  * kernel_main() is the first C function called after the boot assembly
  * sets up long mode and switches to the higher-half virtual address.
  *
- * Initialization order matters: each subsystem may depend on earlier ones.
+ * Initialization order:
+ *   Phase 1  — Serial + VGA (output only)
+ *   Phase 2  — PMM + VMM + Heap
+ *   Phase 3  — CPU structures (GDT, IDT, PIC)
+ *   Phase 4  — Drivers (timer, keyboard, ATA, framebuffer, mouse, PCI)
+ *   Phase 5  — Aether Kernel Layer (cap, IPC, svcbus, secmon, buddy)
+ *   Phase 6  — Core Services (compositor, input service, launcher)
+ *   Phase 7  — Filesystem + networking
+ *   Phase 8  — Process manager + scheduler
+ *   Phase 9  — Enable interrupts + start userland
  */
 #include <kernel.h>
 #include <types.h>
@@ -26,6 +35,16 @@
 #include <fs/vfs.h>
 #include <net/net.h>
 #include <gui/gui.h>
+
+/* === Aether OS architectural layer === */
+#include <kernel/cap.h>
+#include <kernel/ipc.h>
+#include <kernel/svcbus.h>
+#include <kernel/secmon.h>
+#include <mm/buddy.h>
+#include <display/compositor.h>
+#include <input/input_svc.h>
+#include <services/launcher.h>
 
 /* Kernel state */
 static kernel_state_t kernel_state = KERNEL_STATE_BOOT;
@@ -51,7 +70,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
     print_banner();
 
     debug_puts("[boot] Kernel entered 64-bit long mode\n");
-    kinfo("NovOS kernel starting...");
+    kinfo("Aether OS kernel starting — Services. Isolation. Trust.");
     kinfo("Multiboot2 info at %p", (void*)mb2_info);
 
     /* === Phase 2: Memory management === */
@@ -111,6 +130,38 @@ void kernel_main(struct multiboot2_info* mb2_info)
         klog_warn("No framebuffer tag from bootloader, GUI disabled");
     }
 
+    /* === Phase 5: Aether OS Architectural Layer === */
+    kinfo("--- Aether OS Kernel Layer ---");
+
+    kinfo("Initializing capability security table...");
+    cap_table_init();
+
+    kinfo("Initializing security monitor...");
+    secmon_init();
+
+    kinfo("Initializing IPC engine...");
+    ipc_init();
+
+    kinfo("Initializing service bus...");
+    svcbus_init();
+
+    /* Buddy allocator: seed with 16MB starting above the kernel heap */
+    {
+        uint64_t buddy_base_phys = 0x2000000;  /* 32 MB mark */
+        uint64_t buddy_base_virt = PHYS_TO_VIRT(buddy_base_phys);
+        uint64_t buddy_size      = 16 * 1024 * 1024;  /* 16 MB */
+        kinfo("Initializing buddy allocator (16 MB at phys 0x%llx)...",
+              (unsigned long long)buddy_base_phys);
+        buddy_init(buddy_base_phys, buddy_base_virt, buddy_size);
+    }
+
+    kinfo("--- Aether OS Kernel Layer ready ---");
+    kinfo("  Capabilities : active=%u", cap_count());
+    kinfo("  IPC ports    : initialized");
+    kinfo("  Service bus  : initialized");
+    kinfo("  Buddy memory : %llu KB free",
+          (unsigned long long)(buddy_free_bytes() / 1024));
+
     /* === Phase 4c: PCI bus and network === */
     kinfo("Scanning PCI bus...");
     pci_init();
@@ -162,27 +213,63 @@ static void print_banner(void)
     vga_set_color(vga_make_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK));
     vga_puts(
         "\n"
-        "  _   _               ___  ____  \n"
-        " | \\ | |  ___ __   __|   \\/ ___| \n"
-        " |  \\| | / _ \\\\ \\ / / |) \\___ \\ \n"
-        " | |\\  || (_) |\\ V /|___/ ___) |\n"
-        " |_| \\_| \\___/  \\_/ |____||____/ \n"
+        "    ___       _   _                   ___  ____  \n"
+        "   / _ \\     | | | |                 / _ \\/ ___| \n"
+        "  / /_\\ \\ ___| |_| |__   ___ _ __  | | | \\___ \\ \n"
+        "  |  _  |/ _ \\ __| '_ \\ / _ \\ '__| | | | |___) |\n"
+        "  | | | |  __/ |_| | | |  __/ |    | |_| |____/ \n"
+        "  \\_| |_/\\___|\\__|_| |_|\\___|_|     \\___/       \n"
         "\n"
     );
 
     vga_set_color(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-    vga_printf("  NovOS v%s | x86_64 | Kernel at 0xFFFFFFFF80100000\n\n",
-               KERNEL_VERSION);
+    vga_printf("  Aether OS v0.1 | x86_64 | Hybrid Microkernel\n");
+    vga_printf("  Services. Isolation. Trust.\n\n");
 
     vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
 }
 
 /*
- * init_userland - create the init process and (optionally) the GUI thread.
+ * aether_compositor_thread — wraps compositor_run for the process API
+ */
+static void aether_compositor_thread(void)
+{
+    compositor_init();
+    compositor_run();
+}
+
+/*
+ * aether_input_thread — wraps input_svc_run for the process API
+ */
+static void aether_input_thread(void)
+{
+    input_svc_init();
+    input_svc_run();
+}
+
+/*
+ * aether_launcher_thread — wraps launcher_run for the process API
+ */
+static void aether_launcher_thread(void)
+{
+    launcher_init();
+    launcher_run();
+}
+
+/*
+ * init_userland - launch init process and all Aether OS services.
+ *
+ * Service launch order:
+ *   1. init           — base process (manages system services)
+ *   2. aether.display — compositor (owns framebuffer)
+ *   3. aether.input   — input event dispatcher
+ *   4. aether.launcher— application launcher / taskbar
  */
 static void init_userland(void)
 {
     extern void init_process_entry(void);
+
+    kinfo("=== Aether OS — Starting Services ===");
 
     kinfo("Creating init process...");
     process_t* init = process_create("init", init_process_entry, false);
@@ -190,17 +277,48 @@ static void init_userland(void)
         kpanic("Failed to create init process!");
     }
     scheduler_add(init);
-    kinfo("Init process created (PID %u)", init->pid);
+    kinfo("  [OK] init (PID %u)", init->pid);
 
-    /* Launch graphical desktop if framebuffer is available */
-    if (gui_available()) {
-        kinfo("Launching GUI thread...");
-        process_t* gui_proc = process_create("gui", gui_run, false);
-        if (gui_proc) {
-            scheduler_add(gui_proc);
-            kinfo("GUI thread created (PID %u)", gui_proc->pid);
-        } else {
-            klog_warn("Failed to create GUI thread");
-        }
+    if (!gui_available()) {
+        klog_warn("No framebuffer — running headless");
+        return;
     }
+
+    /* aether.display — Compositor service */
+    kinfo("Starting aether.display (compositor)...");
+    process_t* comp_proc = process_create("aether.display",
+                                           aether_compositor_thread, false);
+    if (comp_proc) {
+        scheduler_add(comp_proc);
+        kinfo("  [OK] aether.display (PID %u)", comp_proc->pid);
+    } else {
+        klog_warn("  [FAIL] compositor thread creation failed");
+    }
+
+    /* aether.input — Input service */
+    kinfo("Starting aether.input (input service)...");
+    process_t* input_proc = process_create("aether.input",
+                                            aether_input_thread, false);
+    if (input_proc) {
+        scheduler_add(input_proc);
+        kinfo("  [OK] aether.input (PID %u)", input_proc->pid);
+    } else {
+        klog_warn("  [FAIL] input service thread creation failed");
+    }
+
+    /* aether.launcher — Application launcher */
+    kinfo("Starting aether.launcher...");
+    process_t* launch_proc = process_create("aether.launcher",
+                                             aether_launcher_thread, false);
+    if (launch_proc) {
+        scheduler_add(launch_proc);
+        kinfo("  [OK] aether.launcher (PID %u)", launch_proc->pid);
+    } else {
+        klog_warn("  [FAIL] launcher thread creation failed");
+    }
+
+    kinfo("=== Aether OS — All services started ===");
+    kinfo("  Service bus: %u registered services", svcbus_count());
+    kinfo("  Capabilities: %u active", cap_count());
+    secmon_dump_log(5);
 }

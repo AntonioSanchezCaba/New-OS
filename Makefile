@@ -153,7 +153,15 @@ C_SRCS := \
     net/net.c                   \
     net/ethernet.c              \
     net/ip.c                    \
-    net/tcp.c
+    net/tcp.c                   \
+    kernel/cap.c                \
+    kernel/ipc.c                \
+    kernel/svcbus.c             \
+    kernel/secmon.c             \
+    mm/buddy.c                  \
+    display/compositor.c        \
+    input/input_svc.c           \
+    services/launcher.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \
@@ -189,6 +197,10 @@ dirs:
 	@mkdir -p $(BUILD)/gui
 	@mkdir -p $(BUILD)/apps
 	@mkdir -p $(BUILD)/net
+	@mkdir -p $(BUILD)/display
+	@mkdir -p $(BUILD)/input
+	@mkdir -p $(BUILD)/services
+	@mkdir -p $(BUILD)/mm
 	@mkdir -p $(GRUBDIR)
 
 # Compile C files
