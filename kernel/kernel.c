@@ -19,7 +19,13 @@
 #include <drivers/timer.h>
 #include <drivers/keyboard.h>
 #include <drivers/ata.h>
+#include <drivers/framebuffer.h>
+#include <drivers/mouse.h>
+#include <drivers/pci.h>
+#include <drivers/e1000.h>
 #include <fs/vfs.h>
+#include <net/net.h>
+#include <gui/gui.h>
 
 /* Kernel state */
 static kernel_state_t kernel_state = KERNEL_STATE_BOOT;
@@ -83,6 +89,41 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("Initializing ATA disk controller...");
     ata_init();
 
+    /* === Phase 4b: Framebuffer and GUI input === */
+    struct multiboot2_tag_framebuffer* fb_tag =
+        (struct multiboot2_tag_framebuffer*)
+        multiboot2_find_tag(mb2_info, MULTIBOOT2_TAG_FRAMEBUFFER);
+
+    if (fb_tag) {
+        kinfo("Framebuffer: %ux%u %ubpp at 0x%llx",
+              fb_tag->width, fb_tag->height, fb_tag->bpp,
+              (unsigned long long)fb_tag->addr);
+        fb_init(fb_tag);
+        if (fb_ready()) {
+            kinfo("Initializing PS/2 mouse...");
+            mouse_init();
+            kinfo("Initializing GUI subsystem...");
+            gui_init();
+        } else {
+            klog_warn("Framebuffer init failed, GUI disabled");
+        }
+    } else {
+        klog_warn("No framebuffer tag from bootloader, GUI disabled");
+    }
+
+    /* === Phase 4c: PCI bus and network === */
+    kinfo("Scanning PCI bus...");
+    pci_init();
+
+    kinfo("Initializing e1000 Ethernet driver...");
+    if (e1000_init() == 0) {
+        kinfo("Initializing network stack...");
+        net_init();
+        arp_announce();
+    } else {
+        kinfo("No e1000 NIC found, networking disabled");
+    }
+
     /* === Phase 5: Filesystem === */
     kinfo("Initializing VFS...");
     vfs_init();
@@ -137,7 +178,7 @@ static void print_banner(void)
 }
 
 /*
- * init_userland - create the init process and start the shell.
+ * init_userland - create the init process and (optionally) the GUI thread.
  */
 static void init_userland(void)
 {
@@ -148,7 +189,18 @@ static void init_userland(void)
     if (!init) {
         kpanic("Failed to create init process!");
     }
-
     scheduler_add(init);
     kinfo("Init process created (PID %u)", init->pid);
+
+    /* Launch graphical desktop if framebuffer is available */
+    if (gui_available()) {
+        kinfo("Launching GUI thread...");
+        process_t* gui_proc = process_create("gui", gui_run, false);
+        if (gui_proc) {
+            scheduler_add(gui_proc);
+            kinfo("GUI thread created (PID %u)", gui_proc->pid);
+        } else {
+            klog_warn("Failed to create GUI thread");
+        }
+    }
 }

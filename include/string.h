@@ -39,5 +39,6 @@ size_t strcspn(const char* s, const char* reject);
 /* Kernel sprintf functions */
 int    sprintf(char* buf, const char* fmt, ...);
 int    snprintf(char* buf, size_t n, const char* fmt, ...);
+int    vsnprintf(char* buf, size_t n, const char* fmt, __builtin_va_list);
 
 #endif /* STRING_H */

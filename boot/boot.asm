@@ -29,13 +29,13 @@ mb2_header_start:
     dd  mb2_header_end - mb2_header_start        ; Header length
     dd  -(0xE85250D6 + 0 + (mb2_header_end - mb2_header_start)) ; Checksum
 
-    ;; Framebuffer tag (request VGA text mode)
+    ;; Framebuffer tag (request 1024x768 32bpp linear framebuffer)
     dw  5                   ; Tag type: framebuffer
-    dw  1                   ; Flags: optional
+    dw  1                   ; Flags: optional (don't fail if unsupported)
     dd  20                  ; Size
-    dd  0                   ; Width (0 = don't care)
-    dd  0                   ; Height
-    dd  0                   ; Depth (0 = text mode)
+    dd  1024                ; Preferred width
+    dd  768                 ; Preferred height
+    dd  32                  ; Preferred depth (32bpp)
 
     align 8
     ;; End tag (required)

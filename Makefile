@@ -127,6 +127,10 @@ C_SRCS := \
     drivers/timer.c             \
     drivers/keyboard.c          \
     drivers/ata.c               \
+    drivers/framebuffer.c       \
+    drivers/mouse.c             \
+    drivers/pci.c               \
+    drivers/e1000.c             \
     process/process.c           \
     scheduler/scheduler.c       \
     syscall/syscall.c           \
@@ -136,7 +140,20 @@ C_SRCS := \
     userland/init.c             \
     userland/shell.c            \
     libc/string.c               \
-    libc/printf.c
+    libc/printf.c               \
+    gui/font.c                  \
+    gui/draw.c                  \
+    gui/event.c                 \
+    gui/window_manager.c        \
+    gui/desktop.c               \
+    apps/terminal.c             \
+    apps/filemanager.c          \
+    apps/texteditor.c           \
+    apps/sysmonitor.c           \
+    net/net.c                   \
+    net/ethernet.c              \
+    net/ip.c                    \
+    net/tcp.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \
@@ -169,6 +186,9 @@ dirs:
 	@mkdir -p $(BUILD)/fs
 	@mkdir -p $(BUILD)/userland
 	@mkdir -p $(BUILD)/libc
+	@mkdir -p $(BUILD)/gui
+	@mkdir -p $(BUILD)/apps
+	@mkdir -p $(BUILD)/net
 	@mkdir -p $(GRUBDIR)
 
 # Compile C files
@@ -206,7 +226,10 @@ QEMU := qemu-system-x86_64
 QEMU_ARGS := \
     -cdrom $(KERNEL_ISO)          \
     -m 256M                       \
+    -vga std                      \
     -serial stdio                 \
+    -netdev user,id=net0          \
+    -device e1000,netdev=net0     \
     -no-reboot                    \
     -no-shutdown
 
