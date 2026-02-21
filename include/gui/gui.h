@@ -1,8 +1,8 @@
 /*
- * include/gui/gui.h - Main GUI subsystem header
+ * include/gui/gui.h - Aether OS GUI subsystem
  *
- * Include this in any code that wants to use the desktop environment.
- * Pulls in the framebuffer, drawing, event, and window subsystems.
+ * Include this in any code that uses the desktop environment.
+ * Provides: framebuffer, drawing, events, windows, theme, notifications.
  */
 #ifndef GUI_GUI_H
 #define GUI_GUI_H
@@ -12,6 +12,8 @@
 #include <gui/draw.h>
 #include <gui/event.h>
 #include <gui/window.h>
+#include <gui/theme.h>
+#include <gui/notify.h>
 
 /* Target frame rate */
 #define GUI_TARGET_FPS  60
@@ -20,7 +22,7 @@
 /* GUI initialization (called from kernel_main) */
 void gui_init(void);
 
-/* Main GUI render/event loop (called from the desktop kernel thread) */
+/* Main GUI render/event loop: splash → login → desktop */
 void gui_run(void);
 
 /* Whether the GUI has been successfully initialized */
@@ -30,13 +32,15 @@ bool gui_available(void);
 void desktop_init(void);
 void desktop_tick(void);        /* Called every frame */
 
-/* Launch a GUI application (creates a kernel thread) */
+/* Launch a GUI application */
 void gui_launch_terminal(void);
 void gui_launch_filemanager(void);
 void gui_launch_texteditor(void);
 void gui_launch_sysmonitor(void);
+void gui_launch_settings(void);
 
 /* Taskbar */
+void taskbar_add(wid_t wid, const char* label);
 void taskbar_draw(canvas_t* screen);
 void taskbar_handle_mouse(int x, int y, bool clicked);
 

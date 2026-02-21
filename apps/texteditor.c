@@ -266,12 +266,13 @@ wid_t app_texteditor_create(void)
 
     /* Welcome content */
     const char* welcome[] = {
-        "Welcome to NovOS Text Editor",
+        "Aether OS Text Editor  v0.1",
+        "================================",
         "",
-        "Arrow keys to navigate",
-        "Type to insert text",
-        "Backspace to delete",
-        "Enter for new line",
+        "Arrow keys  : Navigate",
+        "Type        : Insert text",
+        "Backspace   : Delete character",
+        "Enter       : New line",
         "",
         NULL
     };
@@ -286,7 +287,7 @@ wid_t app_texteditor_create(void)
     t->cur_col = 0;
     t->modified = false;
 
-    wid_t wid = wm_create_window("Text Editor",
+    wid_t wid = wm_create_window("Text Editor — Aether OS",
                                   140, 100, TE_W, TE_H,
                                   te_on_event, NULL);
     if (wid < 0) { kfree(t); return -1; }

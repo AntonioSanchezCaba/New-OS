@@ -150,6 +150,9 @@ C_SRCS := \
     apps/filemanager.c          \
     apps/texteditor.c           \
     apps/sysmonitor.c           \
+    apps/settings.c             \
+    gui/theme.c                 \
+    gui/notify.c                \
     net/net.c                   \
     net/ethernet.c              \
     net/ip.c                    \
@@ -161,7 +164,9 @@ C_SRCS := \
     mm/buddy.c                  \
     display/compositor.c        \
     input/input_svc.c           \
-    services/launcher.c
+    services/launcher.c         \
+    services/splash.c           \
+    services/login.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \
