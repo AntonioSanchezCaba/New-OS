@@ -10,6 +10,13 @@
 #include <types.h>
 #include <multiboot2.h>
 
+/* Damage rectangle - marks a dirty screen region for partial flip */
+typedef struct {
+    int x, y, w, h;
+} fb_rect_t;
+
+#define FB_MAX_DAMAGE  64   /* Max dirty rectangles per frame */
+
 /* Framebuffer state */
 typedef struct {
     uint32_t* phys_addr;    /* Physical framebuffer address */
@@ -19,6 +26,15 @@ typedef struct {
     uint32_t  pitch;        /* Bytes per scanline */
     uint8_t   bpp;          /* Bits per pixel */
     bool      initialized;
+
+    /* Damage tracking for partial flips */
+    fb_rect_t damage[FB_MAX_DAMAGE];
+    int       damage_count;
+    bool      full_damage;  /* If true, flip everything (first frame etc.) */
+
+    /* Frame statistics */
+    uint64_t  frame_count;
+    uint64_t  last_flip_tick;
 } framebuffer_t;
 
 extern framebuffer_t fb;
@@ -61,13 +77,20 @@ static inline uint32_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 
 /* Framebuffer API */
 void    fb_init(struct multiboot2_tag_framebuffer* fb_tag);
-void    fb_flip(void);                /* Blit back buffer -> physical fb */
+void    fb_flip(void);                /* Full back buffer -> physical fb */
+void    fb_flip_damage(void);         /* Flip only dirty damage regions */
+void    fb_damage(int x, int y, int w, int h); /* Mark region dirty */
+void    fb_damage_full(void);         /* Mark entire screen dirty */
+void    fb_damage_clear(void);        /* Reset damage list */
 void    fb_clear(uint32_t color);     /* Clear back buffer */
 void    fb_put_pixel(int x, int y, uint32_t color);
 uint32_t fb_get_pixel(int x, int y);
 void    fb_blit_region(int dst_x, int dst_y,
                         const uint32_t* src, int src_w, int src_h, int src_pitch);
+void    fb_blit_alpha(int dst_x, int dst_y,
+                       const uint32_t* src, int src_w, int src_h, int src_pitch);
 bool    fb_ready(void);
+uint64_t fb_frame_count(void);
 
 /* Alpha-blend two colors (src over dst, 8-bit alpha) */
 static inline uint32_t fb_blend(uint32_t dst, uint32_t src)

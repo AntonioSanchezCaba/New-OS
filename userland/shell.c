@@ -240,7 +240,7 @@ static void cmd_mkdir(int argc, char** argv)
         snprintf(path, sizeof(path), "%s/%s", cwd, argv[1]);
     }
 
-    if (vfs_mkdir(path, 0755) != 0) {
+    if (vfs_mkdir(path) != 0) {
         shell_printf("mkdir: cannot create directory '%s'\n", argv[1]);
     }
 }

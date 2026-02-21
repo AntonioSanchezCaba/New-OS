@@ -114,10 +114,33 @@ void fb_blit_region(int dst_x, int dst_y,
 }
 
 /*
- * fb_flip - copy the back buffer to the physical framebuffer (display).
- *
- * For 32bpp: one memcpy per row (fast path when pitch == width * 4).
- * For 24bpp: convert each pixel.
+ * _fb_blit_rows - blit a range of rows from back_buf to physical fb.
+ */
+static void _fb_blit_rows(uint32_t row_start, uint32_t row_end,
+                            int col_start, int col_w)
+{
+    for (uint32_t row = row_start; row < row_end && row < fb.height; row++) {
+        if (fb.bpp == 32) {
+            uint8_t* dst = (uint8_t*)fb.phys_addr +
+                           row * fb.pitch + col_start * 4;
+            const uint32_t* src = fb.back_buf + row * fb.width + col_start;
+            memcpy(dst, src, (size_t)col_w * 4);
+        } else {
+            uint8_t* dst = (uint8_t*)fb.phys_addr +
+                           row * fb.pitch + col_start * 3;
+            const uint32_t* src = fb.back_buf + row * fb.width + col_start;
+            for (int col = 0; col < col_w; col++) {
+                uint32_t px = src[col];
+                dst[col*3+0] = (px      ) & 0xFF;
+                dst[col*3+1] = (px >>  8) & 0xFF;
+                dst[col*3+2] = (px >> 16) & 0xFF;
+            }
+        }
+    }
+}
+
+/*
+ * fb_flip - copy the full back buffer to the physical framebuffer.
  */
 void fb_flip(void)
 {
@@ -127,24 +150,85 @@ void fb_flip(void)
         /* Fast path: single bulk copy */
         memcpy(fb.phys_addr, fb.back_buf,
                (size_t)fb.width * fb.height * 4);
-    } else if (fb.bpp == 32) {
-        /* Pitch differs from stride — copy row by row */
-        for (uint32_t row = 0; row < fb.height; row++) {
-            uint8_t* dst = (uint8_t*)fb.phys_addr + row * fb.pitch;
-            const uint32_t* src = fb.back_buf + row * fb.width;
-            memcpy(dst, src, fb.width * 4);
-        }
     } else {
-        /* 24bpp: strip the alpha byte */
-        for (uint32_t row = 0; row < fb.height; row++) {
-            uint8_t* dst = (uint8_t*)fb.phys_addr + row * fb.pitch;
-            const uint32_t* src = fb.back_buf + row * fb.width;
-            for (uint32_t col = 0; col < fb.width; col++) {
-                uint32_t px = src[col];
-                dst[col * 3 + 0] = (px      ) & 0xFF; /* B */
-                dst[col * 3 + 1] = (px >>  8) & 0xFF; /* G */
-                dst[col * 3 + 2] = (px >> 16) & 0xFF; /* R */
-            }
+        _fb_blit_rows(0, fb.height, 0, (int)fb.width);
+    }
+
+    fb.frame_count++;
+    fb.damage_count = 0;
+    fb.full_damage  = false;
+}
+
+/* ── Damage tracking ─────────────────────────────────────────────────── */
+
+void fb_damage(int x, int y, int w, int h)
+{
+    if (!fb.initialized || fb.full_damage) return;
+    if (fb.damage_count >= FB_MAX_DAMAGE) { fb.full_damage = true; return; }
+
+    /* Clamp */
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > (int)fb.width)  w = (int)fb.width  - x;
+    if (y + h > (int)fb.height) h = (int)fb.height - y;
+    if (w <= 0 || h <= 0) return;
+
+    fb.damage[fb.damage_count].x = x;
+    fb.damage[fb.damage_count].y = y;
+    fb.damage[fb.damage_count].w = w;
+    fb.damage[fb.damage_count].h = h;
+    fb.damage_count++;
+}
+
+void fb_damage_full(void) { fb.full_damage = true; fb.damage_count = 0; }
+void fb_damage_clear(void) { fb.damage_count = 0; fb.full_damage = false; }
+
+/*
+ * fb_flip_damage - flip only dirty rectangles to minimize memory bus traffic.
+ * Falls back to full flip when full_damage is set or no damage rects exist.
+ */
+void fb_flip_damage(void)
+{
+    if (!fb.initialized) return;
+
+    if (fb.full_damage || fb.damage_count == 0) {
+        fb_flip();
+        return;
+    }
+
+    for (int d = 0; d < fb.damage_count; d++) {
+        int rx = fb.damage[d].x;
+        int ry = fb.damage[d].y;
+        int rw = fb.damage[d].w;
+        int rh = fb.damage[d].h;
+        _fb_blit_rows((uint32_t)ry, (uint32_t)(ry + rh), rx, rw);
+    }
+
+    fb.frame_count++;
+    fb.damage_count = 0;
+    fb.full_damage  = false;
+}
+
+uint64_t fb_frame_count(void) { return fb.frame_count; }
+
+/*
+ * fb_blit_alpha - blit with per-pixel alpha blending onto back buffer.
+ */
+void fb_blit_alpha(int dst_x, int dst_y,
+                    const uint32_t* src, int src_w, int src_h, int src_pitch)
+{
+    for (int row = 0; row < src_h; row++) {
+        int dy = dst_y + row;
+        if (dy < 0 || (uint32_t)dy >= fb.height) continue;
+        for (int col = 0; col < src_w; col++) {
+            int dx = dst_x + col;
+            if (dx < 0 || (uint32_t)dx >= fb.width) continue;
+            uint32_t s = src[row * src_pitch + col];
+            uint8_t  a = (s >> 24) & 0xFF;
+            if (a == 0) continue;
+            uint32_t d = fb.back_buf[dy * fb.width + dx];
+            fb.back_buf[dy * fb.width + dx] =
+                (a == 0xFF) ? s : fb_blend(d, s);
         }
     }
 }

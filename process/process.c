@@ -15,6 +15,8 @@
 #include <fs/vfs.h>
 #include <elf.h>
 #include <kernel.h>
+#include <kernel/signal.h>
+#include <drivers/timer.h>
 #include <types.h>
 #include <string.h>
 
@@ -125,14 +127,27 @@ process_t* process_create(const char* name, void (*entry)(void), bool kernel)
 
     proc->pid   = next_pid++;
     proc->ppid  = current_process ? current_process->pid : 0;
+    proc->pgid  = proc->pid;
+    proc->sid   = proc->pid;
     proc->state = PROC_STATE_CREATED;
     strncpy(proc->name, name, MAX_NAME_LEN - 1);
     proc->name[MAX_NAME_LEN - 1] = '\0';
+    strncpy(proc->cwd, "/", MAX_PATH_LEN - 1);
     proc->priority      = 5;
     proc->time_slice    = SCHED_DEFAULT_QUANTUM;
     proc->total_ticks   = 0;
     proc->sleep_until   = 0;
     proc->exit_code     = 0;
+    proc->uid   = 0; proc->euid = 0;
+    proc->gid   = 0; proc->egid = 0;
+    proc->start_tick    = timer_get_ticks();
+    proc->user_ticks    = 0;
+    proc->sys_ticks     = 0;
+    proc->children      = NULL;
+    proc->sibling       = NULL;
+
+    /* Initialize signal state */
+    signal_init_process(proc);
 
     /* Create address space */
     if (kernel) {
@@ -407,4 +422,93 @@ void idle_process(void)
     while (1) {
         cpu_halt();
     }
+}
+
+/* ============================================================
+ * waitpid - wait for a child process to change state
+ * ============================================================ */
+
+pid_t process_waitpid(pid_t pid, int* status, int options)
+{
+    (void)options;
+
+    if (!current_process) return -ESRCH;
+
+    /* Spin until the target child becomes a zombie */
+    for (int attempts = 0; attempts < 10000; attempts++) {
+        process_t* p = process_list;
+        while (p) {
+            if ((pid == (pid_t)-1 || p->pid == pid) &&
+                p->ppid == current_process->pid &&
+                p->state == PROC_STATE_ZOMBIE) {
+                pid_t child_pid = p->pid;
+                if (status) *status = p->exit_code;
+                p->state = PROC_STATE_DEAD;
+                return child_pid;
+            }
+            p = p->next;
+        }
+        scheduler_yield();
+    }
+
+    return -ECHILD;
+}
+
+/* ============================================================
+ * Credential management
+ * ============================================================ */
+
+bool process_is_root(process_t* proc)
+{
+    return proc && proc->euid == 0;
+}
+
+int process_setuid(process_t* proc, uint32_t uid)
+{
+    if (!proc) return -ESRCH;
+    /* Only root can set UID to arbitrary value */
+    if (proc->euid != 0 && uid != proc->uid) return -EPERM;
+    proc->uid  = uid;
+    proc->euid = uid;
+    return 0;
+}
+
+int process_setgid(process_t* proc, uint32_t gid)
+{
+    if (!proc) return -ESRCH;
+    if (proc->egid != 0 && gid != proc->gid) return -EPERM;
+    proc->gid  = gid;
+    proc->egid = gid;
+    return 0;
+}
+
+/* ============================================================
+ * FD dup/dup2
+ * ============================================================ */
+
+int fd_dup(process_t* proc, int fd)
+{
+    if (!proc || fd < 0 || fd >= MAX_FDS) return -EBADF;
+    if (!proc->fds[fd].file) return -EBADF;
+
+    int new_fd = fd_alloc(proc);
+    if (new_fd < 0) return -EMFILE;
+
+    proc->fds[new_fd] = proc->fds[fd];
+    if (proc->fds[new_fd].file) proc->fds[new_fd].file->refcount++;
+    return new_fd;
+}
+
+int fd_dup2(process_t* proc, int oldfd, int newfd)
+{
+    if (!proc || oldfd < 0 || oldfd >= MAX_FDS || newfd < 0 || newfd >= MAX_FDS)
+        return -EBADF;
+    if (!proc->fds[oldfd].file) return -EBADF;
+    if (oldfd == newfd) return newfd;
+
+    if (proc->fds[newfd].file) fd_close(proc, newfd);
+
+    proc->fds[newfd] = proc->fds[oldfd];
+    if (proc->fds[newfd].file) proc->fds[newfd].file->refcount++;
+    return newfd;
 }

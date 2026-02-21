@@ -365,7 +365,7 @@ int ext2_init(uint8_t* data, uint64_t size, const char* mount_point)
     vfs_node_t* root = ext2_mount(data, size);
     if (!root) return -1;
 
-    int result = vfs_mount(mount_point, root);
+    int result = vfs_mount(mount_point, root, NULL);
     if (result != 0) {
         klog_warn("ext2: failed to mount at %s", mount_point);
         kfree(root);

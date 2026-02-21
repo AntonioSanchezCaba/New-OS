@@ -490,7 +490,7 @@ static void cmd_mkdir(term_t* t, const char* name)
         if (strcmp(t->cwd, "/") != 0) strncat(full_path, "/", 2);
         strncat(full_path, name, sizeof(full_path) - strlen(full_path) - 1);
     }
-    int _mr = vfs_mkdir(full_path, 0755);
+    int _mr = vfs_mkdir(full_path);
     if (_mr == 0) term_printf(t, TERM_OK, "Directory created: %s\n", name);
     else          term_printf(t, TERM_ERR, "mkdir: cannot create '%s'\n", name);
 }

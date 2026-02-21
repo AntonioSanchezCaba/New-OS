@@ -162,7 +162,8 @@ vfs_node_t* vfs_finddir(vfs_node_t* node, const char* name)
     return node->ops->finddir(node, name);
 }
 
-vfs_dirent_t* vfs_readdir(vfs_node_t* node, uint32_t index)
+/* Internal helper: returns raw pointer (used by fat32 etc.) */
+static vfs_dirent_t* _vfs_readdir_raw(vfs_node_t* node, uint32_t index)
 {
     if (!node) return NULL;
     if (!(node->flags & VFS_DIRECTORY)) return NULL;
@@ -170,7 +171,17 @@ vfs_dirent_t* vfs_readdir(vfs_node_t* node, uint32_t index)
     return node->ops->readdir(node, index);
 }
 
-int vfs_mkdir(const char* path, uint32_t mode)
+int vfs_readdir(vfs_node_t* node, uint32_t index, vfs_dirent_t* out)
+{
+    if (!node || !out) return -EINVAL;
+    if (!(node->flags & VFS_DIRECTORY)) return -ENOTDIR;
+    vfs_dirent_t* de = _vfs_readdir_raw(node, index);
+    if (!de) return -ENOENT;
+    *out = *de;
+    return 0;
+}
+
+int vfs_mkdir(const char* path)
 {
     /* Find parent directory */
     char dir_path[VFS_NAME_MAX * 16];
@@ -192,7 +203,7 @@ int vfs_mkdir(const char* path, uint32_t mode)
     if (!parent) return -ENOENT;
 
     if (!parent->ops || !parent->ops->mkdir) return -ENOSYS;
-    return parent->ops->mkdir(parent, name, mode);
+    return parent->ops->mkdir(parent, name, 0755);
 }
 
 int vfs_create(const char* path, uint32_t mode)
@@ -243,9 +254,35 @@ int vfs_unlink(const char* path)
     return parent->ops->unlink(parent, name);
 }
 
-int vfs_mount(const char* path, vfs_node_t* node)
+int vfs_mount(const char* path, vfs_node_t* node, void* fs_data)
 {
-    (void)path; (void)node;
+    (void)path; (void)node; (void)fs_data;
     /* Simplified: only root mount is supported */
     return -ENOSYS;
 }
+
+/* ── vfs_stat ────────────────────────────────────────────────────────── */
+int vfs_stat(vfs_node_t* node, vfs_stat_t* st)
+{
+    if (!node || !st) return -EINVAL;
+    memset(st, 0, sizeof(*st));
+    st->size  = node->size;
+    st->mode  = node->mode;
+    st->uid   = node->uid;
+    st->gid   = node->gid;
+    st->atime = node->atime;
+    st->mtime = node->mtime;
+    st->ctime = node->ctime;
+    st->type  = (node->flags & VFS_DIRECTORY) ? VFS_TYPE_DIR : VFS_TYPE_FILE;
+    return 0;
+}
+
+/* ── vfs_rmdir ───────────────────────────────────────────────────────── */
+int vfs_rmdir(const char* path)
+{
+    if (!path) return -EINVAL;
+    /* For now delegate to unlink — a proper impl checks it's an empty dir */
+    return vfs_unlink(path);
+}
+
+

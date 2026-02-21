@@ -10,6 +10,7 @@
 #include <types.h>
 #include <memory.h>
 #include <interrupts.h>
+#include <kernel/signal.h>
 
 /* Maximum number of simultaneous processes */
 #define MAX_PROCESSES   256
@@ -64,7 +65,10 @@ typedef struct {
 typedef struct process {
     pid_t         pid;              /* Process ID */
     pid_t         ppid;            /* Parent process ID */
+    pid_t         pgid;            /* Process group ID (for signals) */
+    pid_t         sid;             /* Session ID */
     char          name[MAX_NAME_LEN];
+    char          cwd[MAX_PATH_LEN]; /* Current working directory */
     proc_state_t  state;
     int           exit_code;
 
@@ -85,12 +89,28 @@ typedef struct process {
     uint64_t      total_ticks;    /* Total CPU ticks used */
     uint64_t      sleep_until;    /* Wake up at this tick (for sleep) */
 
+    /* Signal subsystem */
+    signal_state_t sigstate;      /* Per-process signal state */
+
+    /* Credentials */
+    uint32_t      uid;            /* User ID (0 = root) */
+    uint32_t      gid;            /* Group ID */
+    uint32_t      euid;           /* Effective UID */
+    uint32_t      egid;           /* Effective GID */
+
     /* File descriptors */
     fd_entry_t    fds[MAX_FDS];
+
+    /* Accounting */
+    uint64_t      start_tick;     /* Timer tick when process was created */
+    uint64_t      user_ticks;     /* Ticks spent in user mode */
+    uint64_t      sys_ticks;      /* Ticks spent in kernel mode */
 
     /* Process list links */
     struct process* next;
     struct process* prev;
+    struct process* children;     /* Linked list of child processes */
+    struct process* sibling;      /* Next sibling in parent's child list */
 } process_t;
 
 /* Process list */
@@ -107,10 +127,18 @@ void       process_kill(pid_t pid, int signal);
 process_t* process_get_by_pid(pid_t pid);
 void       process_sleep(uint64_t ticks);
 void       process_wake(process_t* proc);
+pid_t      process_waitpid(pid_t pid, int* status, int options);
+
+/* Credential helpers */
+bool       process_is_root(process_t* proc);
+int        process_setuid(process_t* proc, uint32_t uid);
+int        process_setgid(process_t* proc, uint32_t gid);
 
 /* FD management */
 int  fd_alloc(process_t* proc);
 void fd_close(process_t* proc, int fd);
+int  fd_dup(process_t* proc, int fd);
+int  fd_dup2(process_t* proc, int oldfd, int newfd);
 
 /* Context switch (implemented in context.asm) */
 void context_switch(cpu_context_t* old_ctx, cpu_context_t* new_ctx);

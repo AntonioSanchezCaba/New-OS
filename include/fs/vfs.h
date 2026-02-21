@@ -84,12 +84,31 @@ typedef struct vfs_node {
     struct vfs_node* mount;      /* Mounted filesystem root */
 } vfs_node_t;
 
+/* File type constants for vfs_dirent.type and vfs_stat.type */
+#define VFS_TYPE_FILE  1
+#define VFS_TYPE_DIR   2
+#define VFS_TYPE_LINK  3
+#define VFS_TYPE_DEV   4
+
 /* Directory entry (used when listing directory contents) */
 typedef struct vfs_dirent {
     char     name[VFS_NAME_MAX + 1];
     uint64_t inode;
-    uint32_t type;
+    uint32_t type;   /* VFS_TYPE_FILE, VFS_TYPE_DIR, … */
+    uint64_t size;
 } vfs_dirent_t;
+
+/* Stat result */
+typedef struct vfs_stat {
+    uint64_t size;
+    uint32_t type;   /* VFS_TYPE_FILE etc. */
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint64_t atime;
+    uint64_t mtime;
+    uint64_t ctime;
+} vfs_stat_t;
 
 /* Open file handle */
 typedef struct file {
@@ -99,11 +118,19 @@ typedef struct file {
     int         refcount;
 } file_t;
 
+/* Extra open flags (aliases for compatibility) */
+#define VFS_O_RDONLY   O_RDONLY
+#define VFS_O_WRONLY   O_WRONLY
+#define VFS_O_RDWR     O_RDWR
+#define VFS_O_CREAT    O_CREAT
+#define VFS_O_TRUNC    O_TRUNC
+#define VFS_O_APPEND   O_APPEND
+
 /* VFS API */
 void       vfs_init(void);
 vfs_node_t* vfs_root(void);
 void       vfs_mount_root(vfs_node_t* root);
-int        vfs_mount(const char* path, vfs_node_t* node);
+int        vfs_mount(const char* path, vfs_node_t* node, void* fs_data);
 
 /* Path-based operations */
 vfs_node_t* vfs_open(const char* path, int flags);
@@ -111,8 +138,10 @@ void        vfs_close(vfs_node_t* node);
 ssize_t     vfs_read(vfs_node_t* node, off_t offset, size_t size, void* buf);
 ssize_t     vfs_write(vfs_node_t* node, off_t offset, size_t size, const void* buf);
 vfs_node_t* vfs_finddir(vfs_node_t* node, const char* name);
-vfs_dirent_t* vfs_readdir(vfs_node_t* node, uint32_t index);
-int         vfs_mkdir(const char* path, uint32_t mode);
+int         vfs_readdir(vfs_node_t* node, uint32_t index, vfs_dirent_t* out);
+int         vfs_stat(vfs_node_t* node, vfs_stat_t* st);
+int         vfs_mkdir(const char* path);
+int         vfs_rmdir(const char* path);
 int         vfs_create(const char* path, uint32_t mode);
 int         vfs_unlink(const char* path);
 vfs_node_t* vfs_resolve_path(const char* path);

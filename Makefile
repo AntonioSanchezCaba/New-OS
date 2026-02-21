@@ -171,7 +171,14 @@ C_SRCS := \
     apps/calculator.c           \
     apps/clock.c                \
     apps/stress_test.c          \
-    fs/ext2.c
+    fs/ext2.c                   \
+    fs/fat32.c                  \
+    kernel/signal.c             \
+    kernel/shm.c                \
+    kernel/tty.c                \
+    kernel/pkg.c                \
+    net/socket.c                \
+    services/bootanim.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \
