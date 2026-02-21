@@ -271,6 +271,82 @@ GRUB/UEFI → boot.asm
 
 ---
 
+## GUI Subsystem — Detailed Design
+
+### Compositor & Window Manager
+
+The WM runs entirely in kernel-space (ring 0) in v0.1 as a single module
+(`gui/window_manager.c`).  Each window owns a pixel buffer of size
+`w × (TITLEBAR_H + h) × 4` bytes.  The compositor walks the Z-order array
+back-to-front each frame and:
+
+1. Draws a translucent drop shadow (offset blended rectangle, α=0x60)
+2. Draws the window border (2px, focused=accent / unfocused=grey)
+3. Blits the window's pixel buffer to the screen back-buffer
+4. Draws resize handle indicators on focused, resizable windows
+
+### Resize Handles
+
+Windows with `WF_RESIZEABLE` expose 6-pixel hot-zones at the right and bottom
+edges.  On `MOUSE_DOWN` within a hot-zone, the WM records the drag start
+geometry and begins a resize drag.  On each `MOUSE_MOVE` while dragging, the
+WM calls `wm_resize()` which reallocates the pixel buffer to the new size and
+fires a `GUI_EVENT_RESIZE` to the window's callback.  Minimum size: 120×60.
+
+### Widget Toolkit
+
+`widget_group_t` stores up to 64 `widget_t` entries.  Widget types:
+
+| Type          | Draw                        | Event                          |
+|---------------|-----------------------------|--------------------------------|
+| BUTTON        | Rounded rect + centered text| MOUSE_DOWN → pressed; UP → triggered |
+| LABEL         | draw_string at y-center     | (no interaction)               |
+| TEXTINPUT     | Field + cursor blink        | KEY_DOWN inserts/deletes chars |
+| CHECKBOX      | Box + checkmark + label     | MOUSE_DOWN → toggle            |
+| PROGRESSBAR   | Track + fill + pct text     | (no interaction)               |
+| SEPARATOR     | Horiz/vert hline            | (no interaction)               |
+
+Cursor blink is driven by `widget_group_tick()` called each desktop frame.
+
+### Theme Engine
+
+At startup, `theme_init()` loads the dark palette.  Settings app calls
+`theme_set(THEME_LIGHT)` or `theme_set_accent(ACCENT_GREEN)`.  These write
+into a modifiable `g_current` copy of the static palette, then call
+`apply_accent()` to patch accent-dependent fields.  All components call
+`theme_current()` every frame — no caching needed since it returns a pointer.
+
+### EXT2 Driver
+
+The EXT2 driver (`fs/ext2.c`) reads an in-memory byte array:
+
+```
+Image byte offset 1024 → ext2_superblock_t
+Block 1 (after superblock block) → block group descriptor table
+Group 0, inode table block → inode for root dir (inode #2)
+```
+
+`ext2_finddir()` walks directory entries in each allocated block of the
+directory inode.  `ext2_read()` translates logical block numbers through up to
+three levels of indirection.  All nodes are allocated via `kmalloc` and freed
+when the VFS layer decrements refcount to zero.
+
+### Clock App — Integer Trigonometry
+
+The analog clock face uses a 360-entry `sin_table[]` scaled by 1024.
+`isin(deg)` and `icos(deg)` return values in the range ±1024.  Hand tip
+coordinates are computed as:
+
+```
+x = cx + length * isin(angle) / 1024
+y = cy - length * icos(angle) / 1024   (y-axis inverted in screen space)
+```
+
+Hour hand angle: `h * 30 + minutes / 2` (0 = 12 o'clock).
+Second hand uses thin 1-pixel `draw_hand` for visual distinction.
+
+---
+
 ## Future Roadmap
 
 - **v0.2**: True user-space drivers (ring 3 services with MMU isolation)

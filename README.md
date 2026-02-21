@@ -1,6 +1,10 @@
-# NovOS - 64-bit x86_64 Operating System
+# Aether OS — 64-bit x86_64 Desktop Operating System
 
-A fully functional, 64-bit operating system written in C and x86_64 Assembly from scratch. Boots on real hardware or QEMU via Multiboot2/GRUB.
+A fully graphical desktop OS written from scratch in C and x86_64 NASM Assembly.
+Boots via Multiboot2/GRUB through a boot splash → login screen → full desktop
+environment with window manager, widget toolkit, and multiple applications.
+
+> **Previously known as NovOS** — this is Aether OS v0.1 "Genesis".
 
 ---
 
@@ -115,7 +119,7 @@ CPU Exception / IRQ fires
 | 9 | brk     | new_brk                 | Set heap end (sbrk)      |
 |23 | yield   | —                       | Voluntary CPU yield      |
 
-### Filesystem (VFS + ramfs)
+### Filesystem (VFS + ramfs + EXT2)
 
 **VFS Layer** — `fs/vfs.c`
 - Unified interface for any backing filesystem
@@ -127,6 +131,13 @@ CPU Exception / IRQ fires
 - Files stored as `uint8_t*` arrays (grow dynamically)
 - Directories store up to 64 children
 - Pre-populated at boot: `/bin`, `/etc`, `/dev`, `/proc`, `/tmp`, `/home`
+
+**EXT2 Read-Only Driver** — `fs/ext2.c`
+- Parses EXT2 (Second Extended Filesystem) disk images in memory
+- Supports direct, single-indirect, double-indirect, triple-indirect blocks
+- Block group descriptor table traversal, inode lookup by number
+- Mounts as a VFS subtree (e.g. `/media/disk0`) via `ext2_init()`
+- Compatible with `mkfs.ext2` formatted images
 
 ### Drivers
 
@@ -259,3 +270,69 @@ We disable SSE/MMX/AVX with `-mno-sse -mno-mmx` because these instructions requi
 
 ### Locking
 Spinlocks and critical sections use `cli`/`sti` to disable interrupts. For a proper SMP kernel, atomic operations and per-CPU structures would be needed.
+
+---
+
+## Graphical Desktop (Aether OS Extensions)
+
+### Boot Flow
+```
+GRUB → kernel_main() → GUI init → splash_run() → login_run() → desktop loop
+```
+
+### GUI Subsystem
+
+**Framebuffer & Compositor** — `drivers/framebuffer.c`, `gui/draw.c`
+- Double-buffered VESA linear framebuffer (32-bit ARGB)
+- Alpha-blending: `fb_blend()` for translucent effects
+- Primitives: filled/outlined rect, circle, rounded rect, gradient, blit, scroll
+
+**Window Manager** — `gui/window_manager.c`
+- Up to 32 simultaneous windows, Z-ordered array
+- Title bar with focus gradient, close button (×)
+- Mouse-drag to move (title bar grab), drag to resize (corner/edge handles)
+- Drop shadows (translucent offset rectangle behind each window)
+- Event routing: mouse hit-test front-to-back, keyboard to focused window
+
+**Theme Engine** — `gui/theme.c`, `include/gui/theme.h`
+- Runtime dark/light switching, 4 accent colours (Blue, Purple, Green, Red)
+- 60+ named color fields covering all GUI components
+- All components read from `theme_current()` — zero hard-coded colors in apps
+
+**Widget Toolkit** — `gui/widgets.c`, `include/gui/widgets.h`
+- `widget_group_t` holds up to 64 widgets per window
+- Widget types: Button, Label, TextInput, CheckBox, ProgressBar, Separator
+- TextInput: cursor, selection scroll, password masking, insert/delete/arrow keys
+- `widget_group_handle_event()` returns triggered widget ID for clean callbacks
+
+**Notification System** — `gui/notify.c`, `include/gui/notify.h`
+- Toast popups at top-right, up to 5 stacked
+- Types: Info, Warning, Error (colored stripe)
+- Auto-dismiss with animated countdown progress bar
+
+### Applications
+
+| App            | File                   | Key Features                                    |
+|----------------|------------------------|-------------------------------------------------|
+| Terminal       | `apps/terminal.c`      | 22 commands, command history (↑/↓), VFS nav    |
+| File Manager   | `apps/filemanager.c`   | Two-pane, double-click nav, delete confirm      |
+| Text Editor    | `apps/texteditor.c`    | Basic editor, line display                      |
+| System Monitor | `apps/sysmonitor.c`    | CPU %, memory bar, process list                 |
+| Settings       | `apps/settings.c`      | Theme, accent, memory, about tabs               |
+| Calculator     | `apps/calculator.c`    | 4-function + %, negate, keyboard input          |
+| Clock          | `apps/clock.c`         | Analog face + digital, uptime display           |
+| Stress Test    | `apps/stress_test.c`   | 6 workers, scheduler fairness bars, heap stats  |
+
+### QEMU Run (with VGA graphics)
+```bash
+qemu-system-x86_64 \
+  -cdrom build/novos.iso \
+  -m 256M \
+  -vga std \
+  -serial stdio \
+  -netdev user,id=net0 \
+  -device e1000,netdev=net0 \
+  -no-reboot -no-shutdown
+```
+The VGA window shows the graphical desktop.  Serial output on stdio shows
+kernel debug logs.

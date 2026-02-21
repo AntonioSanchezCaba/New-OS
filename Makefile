@@ -166,7 +166,12 @@ C_SRCS := \
     input/input_svc.c           \
     services/launcher.c         \
     services/splash.c           \
-    services/login.c
+    services/login.c            \
+    gui/widgets.c               \
+    apps/calculator.c           \
+    apps/clock.c                \
+    apps/stress_test.c          \
+    fs/ext2.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \

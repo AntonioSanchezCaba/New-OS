@@ -38,6 +38,13 @@ void gui_launch_filemanager(void);
 void gui_launch_texteditor(void);
 void gui_launch_sysmonitor(void);
 void gui_launch_settings(void);
+void gui_launch_calculator(void);
+void gui_launch_clock(void);
+void gui_launch_stress_test(void);
+
+/* Periodic ticks from desktop loop */
+void clock_tick(void);
+void stress_tick(void);
 
 /* Taskbar */
 void taskbar_add(wid_t wid, const char* label);

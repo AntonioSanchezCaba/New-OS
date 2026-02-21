@@ -33,6 +33,17 @@
 #define WF_MINIMIZED   (1 << 4)
 #define WF_MAXIMIZED   (1 << 5)
 #define WF_NO_TITLEBAR (1 << 6)
+#define WF_RESIZEABLE  (1 << 7)   /* Allows drag-to-resize at edges/corners */
+
+/* Resize edge bitmask (stored in resize_edge) */
+#define RESIZE_NONE   0x00
+#define RESIZE_RIGHT  0x01
+#define RESIZE_BOTTOM 0x02
+#define RESIZE_LEFT   0x04
+#define RESIZE_TOP    0x08
+
+/* Handle grab zone thickness in pixels */
+#define WM_RESIZE_ZONE 6
 
 /* Window identifier */
 typedef int wid_t;
@@ -59,6 +70,16 @@ typedef struct {
     bool drag_active;
     int  drag_offset_x;
     int  drag_offset_y;
+
+    /* Internal resize state */
+    bool     resize_active;
+    uint8_t  resize_edge;     /* RESIZE_* bitmask */
+    int      resize_start_mx; /* Mouse position at resize start */
+    int      resize_start_my;
+    int      resize_start_x;  /* Window geometry at resize start */
+    int      resize_start_y;
+    int      resize_start_w;
+    int      resize_start_h;
 
     /* Pre-minimize/maximize saved geometry */
     int saved_x, saved_y, saved_w, saved_h;

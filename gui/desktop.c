@@ -209,18 +209,24 @@ static void _launch_files(void)       { gui_launch_filemanager(); startmenu_open
 static void _launch_editor(void)      { gui_launch_texteditor();  startmenu_open = false; }
 static void _launch_monitor(void)     { gui_launch_sysmonitor();  startmenu_open = false; }
 static void _launch_settings(void)    { gui_launch_settings();    startmenu_open = false; }
+static void _launch_calculator(void)  { gui_launch_calculator();  startmenu_open = false; }
+static void _launch_clock(void)       { gui_launch_clock();       startmenu_open = false; }
+static void _launch_stress(void)      { gui_launch_stress_test(); startmenu_open = false; }
 static void _do_shutdown(void)        { cpu_cli(); cpu_halt(); }
 
 static const menu_item_t g_menu_items[] = {
-    { "Terminal",       "  >_ ", _launch_terminal },
-    { "File Manager",   "  [] ", _launch_files    },
-    { "Text Editor",    "  == ", _launch_editor   },
-    { "System Monitor", "  ## ", _launch_monitor  },
-    { "Settings",       "  @@ ", _launch_settings },
+    { "Terminal",       "  >_ ", _launch_terminal    },
+    { "File Manager",   "  [] ", _launch_files       },
+    { "Text Editor",    "  == ", _launch_editor      },
+    { "System Monitor", "  ## ", _launch_monitor     },
+    { "Calculator",     "  +- ", _launch_calculator  },
+    { "Clock",          "  O  ", _launch_clock       },
+    { "Settings",       "  @@ ", _launch_settings    },
+    { "Stress Test",    "  ~~ ", _launch_stress      },
     { NULL, NULL, NULL },  /* Separator */
-    { "Shutdown",       "  X  ", _do_shutdown     },
+    { "Shutdown",       "  X  ", _do_shutdown        },
 };
-#define MENU_ITEM_COUNT 7
+#define MENU_ITEM_COUNT 10
 
 static void draw_start_menu(canvas_t* screen)
 {
@@ -422,6 +428,10 @@ void gui_run(void)
         /* Remove closed windows from taskbar */
         taskbar_remove_closed();
 
+        /* Per-app periodic ticks */
+        clock_tick();
+        stress_tick();
+
         /* Desktop background + taskbar + notifications */
         desktop_tick();
 
@@ -460,6 +470,10 @@ extern wid_t app_filemanager_create(void);
 extern wid_t app_texteditor_create(void);
 extern wid_t app_sysmonitor_create(void);
 extern wid_t app_settings_create(void);
+
+/* New apps — these manage their own static state */
+/* gui_launch_calculator, gui_launch_clock, gui_launch_stress_test
+ * are defined in their respective .c files and declared in gui.h */
 
 void gui_launch_terminal(void)
 {

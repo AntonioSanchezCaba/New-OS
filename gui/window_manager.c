@@ -4,7 +4,10 @@
  * Manages a stack of up to WM_MAX_WINDOWS windows.
  * Each window owns its pixel buffer (titlebar + client area).
  * The compositor walks the z-order array (back-to-front) and blits
- * each window's buffer to the screen canvas.
+ * each window's buffer to the screen canvas, preceded by a drop shadow.
+ *
+ * Resize handles: windows with WF_RESIZEABLE expose WM_RESIZE_ZONE pixel
+ * hot-zones at the right/bottom/corner edges for mouse-drag resizing.
  */
 #include <gui/window.h>
 #include <gui/event.h>
@@ -147,7 +150,7 @@ wid_t wm_create_window(const char* title, int x, int y, int w, int h,
     win->y         = y;
     win->w         = w;
     win->h         = h;
-    win->flags     = WF_VISIBLE | WF_MOVEABLE | WF_CLOSEABLE;
+    win->flags     = WF_VISIBLE | WF_MOVEABLE | WF_CLOSEABLE | WF_RESIZEABLE;
     win->buf       = buf;
     win->on_event  = cb;
     win->userdata  = userdata;
@@ -355,6 +358,8 @@ void wm_dispatch_events(void)
                 wm_raise(w->id);
 
                 int wx = w->x, wy = w->y;
+                int win_total_h = WM_TITLEBAR_H + w->h;
+
                 /* Close button hit? */
                 if ((w->flags & WF_CLOSEABLE) &&
                     mx >= wx + w->w - 22 && mx < wx + w->w - 4 &&
@@ -362,6 +367,28 @@ void wm_dispatch_events(void)
                     wm_close(w->id);
                     continue;
                 }
+
+                /* Resize handle hit? (right/bottom edges + corners) */
+                if (w->flags & WF_RESIZEABLE) {
+                    bool on_right  = (mx >= wx + w->w - WM_RESIZE_ZONE) &&
+                                     (mx <  wx + w->w + WM_BORDER_W);
+                    bool on_bottom = (my >= wy + win_total_h - WM_RESIZE_ZONE) &&
+                                     (my <  wy + win_total_h + WM_BORDER_W);
+
+                    if (on_right || on_bottom) {
+                        w->resize_active  = true;
+                        w->resize_edge    = (on_right  ? RESIZE_RIGHT  : 0) |
+                                            (on_bottom ? RESIZE_BOTTOM : 0);
+                        w->resize_start_mx = mx;
+                        w->resize_start_my = my;
+                        w->resize_start_x  = wx;
+                        w->resize_start_y  = wy;
+                        w->resize_start_w  = w->w;
+                        w->resize_start_h  = w->h;
+                        continue;
+                    }
+                }
+
                 /* Titlebar drag start? */
                 if ((w->flags & WF_MOVEABLE) &&
                     mx >= wx && mx < wx + w->w &&
@@ -374,9 +401,12 @@ void wm_dispatch_events(void)
             }
 
             if (evt.type == GUI_EVENT_MOUSE_UP) {
-                /* End drag on all windows */
+                /* End drag and resize on all windows */
                 for (int i = 0; i < WM_MAX_WINDOWS; i++) {
-                    if (window_used[i]) windows[i].drag_active = false;
+                    if (window_used[i]) {
+                        windows[i].drag_active   = false;
+                        windows[i].resize_active = false;
+                    }
                 }
             }
 
@@ -385,10 +415,38 @@ void wm_dispatch_events(void)
                 for (int i = 0; i < WM_MAX_WINDOWS; i++) {
                     if (!window_used[i]) continue;
                     window_t* w = &windows[i];
+
                     if (w->drag_active) {
                         int nx = mx - w->drag_offset_x;
                         int ny = my - w->drag_offset_y;
                         wm_move(w->id, nx, ny);
+                    }
+
+                    if (w->resize_active) {
+                        int dx = mx - w->resize_start_mx;
+                        int dy = my - w->resize_start_my;
+                        int new_w = w->resize_start_w;
+                        int new_h = w->resize_start_h;
+                        int new_x = w->resize_start_x;
+                        int new_y = w->resize_start_y;
+
+                        if (w->resize_edge & RESIZE_RIGHT)  new_w += dx;
+                        if (w->resize_edge & RESIZE_BOTTOM) new_h += dy;
+                        if (w->resize_edge & RESIZE_LEFT) {
+                            new_w -= dx; new_x += dx;
+                        }
+                        if (w->resize_edge & RESIZE_TOP) {
+                            new_h -= dy; new_y += dy;
+                        }
+
+                        /* Enforce minimum size */
+                        if (new_w < 120) new_w = 120;
+                        if (new_h <  60) new_h =  60;
+
+                        if (new_x != w->x || new_y != w->y)
+                            wm_move(w->id, new_x, new_y);
+                        if (new_w != w->w || new_h != w->h)
+                            wm_resize(w->id, new_w, new_h);
                     }
                 }
             }
@@ -421,6 +479,11 @@ void wm_dispatch_events(void)
  * Compositor: blit all windows to screen canvas
  * ========================================================= */
 
+/* Drop shadow constants */
+#define SHADOW_OFFSET_X  4
+#define SHADOW_OFFSET_Y  5
+#define SHADOW_COLOR     rgba(0x00, 0x00, 0x00, 0x60)  /* 38% alpha */
+
 void wm_composite(canvas_t* screen)
 {
     /* Draw windows back-to-front */
@@ -431,17 +494,61 @@ void wm_composite(canvas_t* screen)
         if (!(w->flags & WF_VISIBLE)) continue;
         if (w->flags & WF_MINIMIZED) continue;
 
-        /* Draw border */
+        int win_total_h = WM_TITLEBAR_H + w->h;
+
+        /* --- Drop shadow (translucent rect offset behind window) --- */
+        int sx = w->x - WM_BORDER_W + SHADOW_OFFSET_X;
+        int sy = w->y - WM_BORDER_W + SHADOW_OFFSET_Y;
+        int sw = w->w + WM_BORDER_W * 2;
+        int sh = win_total_h + WM_BORDER_W * 2;
+
+        /* Clamp shadow to screen bounds */
+        if (sx < 0) { sw += sx; sx = 0; }
+        if (sy < 0) { sh += sy; sy = 0; }
+        if (sx + sw > screen->width)  sw = screen->width  - sx;
+        if (sy + sh > screen->height) sh = screen->height - sy;
+
+        if (sw > 0 && sh > 0) {
+            /* Blend shadow over whatever is behind */
+            for (int row = 0; row < sh; row++) {
+                for (int col = 0; col < sw; col++) {
+                    int px = sx + col;
+                    int py = sy + row;
+                    if (px < 0 || px >= screen->width) continue;
+                    if (py < 0 || py >= screen->height) continue;
+                    uint32_t* dst = &screen->pixels[py * screen->stride + px];
+                    *dst = fb_blend(*dst, SHADOW_COLOR);
+                }
+            }
+        }
+
+        /* --- Window border --- */
         draw_rect_outline(screen,
                           w->x - WM_BORDER_W,
                           w->y - WM_BORDER_W,
                           w->w + WM_BORDER_W * 2,
-                          WM_TITLEBAR_H + w->h + WM_BORDER_W * 2,
+                          win_total_h + WM_BORDER_W * 2,
                           WM_BORDER_W,
                           (w->flags & WF_FOCUSED) ? COLOR_WIN_BORDER : COLOR_MID_GREY);
 
-        /* Blit entire window buffer (titlebar + client) */
-        draw_blit(screen, w->x, w->y,
-                  w->buf, w->w, WM_TITLEBAR_H + w->h);
+        /* --- Blit entire window buffer (titlebar + client) --- */
+        draw_blit(screen, w->x, w->y, w->buf, w->w, win_total_h);
+
+        /* --- Resize handles: small squares at corners/edges --- */
+        if ((w->flags & WF_RESIZEABLE) && (w->flags & WF_FOCUSED)) {
+            int rx = w->x + w->w - WM_RESIZE_ZONE;
+            int ry = w->y + win_total_h - WM_RESIZE_ZONE;
+            /* Bottom-right corner grip */
+            draw_rect(screen, rx, ry, WM_RESIZE_ZONE, WM_RESIZE_ZONE,
+                      COLOR_WIN_BORDER);
+            /* Bottom-center edge mark */
+            int bc_x = w->x + w->w / 2 - 3;
+            draw_rect(screen, bc_x, w->y + win_total_h - 2, 6, 2,
+                      COLOR_WIN_BORDER);
+            /* Right-center edge mark */
+            int rc_y = w->y + win_total_h / 2 - 3;
+            draw_rect(screen, w->x + w->w - 2, rc_y, 2, 6,
+                      COLOR_WIN_BORDER);
+        }
     }
 }
