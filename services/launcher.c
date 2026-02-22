@@ -16,6 +16,7 @@
  * surfaces while also registering as "aether.launcher" in the service bus.
  */
 #include <services/launcher.h>
+#include <kernel/version.h>
 #include <kernel/ipc.h>
 #include <kernel/svcbus.h>
 #include <kernel/cap.h>
@@ -161,7 +162,7 @@ static void _draw_taskbar(canvas_t* screen)
     uint32_t start_col = hovered ? COLOR_BTN_HOVER : COLOR_ACCENT;
     draw_rect_rounded(screen, DOCK_PAD, ty + 5, 72, TASKBAR_H - 10, 6, start_col);
     draw_string_centered(screen, DOCK_PAD, ty + 5, 72, TASKBAR_H - 10,
-                         "Aether", COLOR_TEXT_LIGHT, rgba(0,0,0,0));
+                         OS_SHORT_NAME, COLOR_TEXT_LIGHT, rgba(0,0,0,0));
 
     /* Window buttons */
     int bx = 84;
@@ -226,7 +227,7 @@ static void _draw_app_grid(canvas_t* screen)
 
     /* Grid title */
     draw_string_centered(screen, 0, 20, sw, FONT_H + 8,
-                         "Aether OS — Applications",
+                         OS_NAME " — Applications",
                          COLOR_TEXT_LIGHT, rgba(0,0,0,0));
 
     /* Grid of app tiles */

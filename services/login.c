@@ -5,6 +5,7 @@
  * For v0.1, any non-empty credentials are accepted.
  */
 #include <services/login.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/theme.h>
 #include <drivers/framebuffer.h>
@@ -100,11 +101,11 @@ static void draw_login_screen(canvas_t* screen)
     draw_rect_outline(screen, bx, by, BOX_W, BOX_H, 1, th->login_box_border);
 
     /* OS logo above box */
-    const char* logo = "Aether OS";
+    const char* logo = OS_NAME;
     int lw = (int)strlen(logo) * FONT_W;
     draw_string(screen, cx - lw / 2, by - FONT_H * 2 - 8, logo,
                 th->accent, rgba(0,0,0,0));
-    const char* sub = "v0.1  \"Genesis\"";
+    const char* sub = OS_BANNER_SHORT;
     int sw = (int)strlen(sub) * FONT_W;
     draw_string(screen, cx - sw / 2, by - FONT_H - 4, sub,
                 th->splash_text, rgba(0,0,0,0));
@@ -114,7 +115,7 @@ static void draw_login_screen(canvas_t* screen)
     draw_rect(screen, bx, by, BOX_W, hdr_h, th->win_title_bg);
     draw_rect_outline(screen, bx, by, BOX_W, hdr_h, 0, 0);
     draw_hline(screen, bx, by + hdr_h, BOX_W, th->win_border);
-    const char* hdr = "Sign in to Aether OS";
+    const char* hdr = "Sign in to " OS_NAME;
     int hw = (int)strlen(hdr) * FONT_W;
     draw_string(screen, cx - hw / 2, by + (hdr_h - FONT_H) / 2, hdr,
                 th->win_title_text, rgba(0,0,0,0));

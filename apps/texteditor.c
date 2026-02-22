@@ -5,6 +5,7 @@
  * Files can be opened via VFS (placeholder) or used as scratch pad.
  */
 #include <gui/window.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/event.h>
 #include <fs/vfs.h>
@@ -266,7 +267,7 @@ wid_t app_texteditor_create(void)
 
     /* Welcome content */
     const char* welcome[] = {
-        "Aether OS Text Editor  v0.1",
+        OS_NAME " Text Editor  v" OS_VERSION,
         "================================",
         "",
         "Arrow keys  : Navigate",
@@ -287,7 +288,7 @@ wid_t app_texteditor_create(void)
     t->cur_col = 0;
     t->modified = false;
 
-    wid_t wid = wm_create_window("Text Editor — Aether OS",
+    wid_t wid = wm_create_window("Text Editor — " OS_NAME,
                                   140, 100, TE_W, TE_H,
                                   te_on_event, NULL);
     if (wid < 0) { kfree(t); return -1; }

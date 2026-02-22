@@ -1,5 +1,5 @@
 /*
- * kernel/kernel.c - Aether OS Kernel Entry Point
+ * kernel/kernel.c - AetherOS Kernel Entry Point (v1.0.0 — Genesis)
  *
  * kernel_main() is the first C function called after the boot assembly
  * sets up long mode and switches to the higher-half virtual address.
@@ -16,6 +16,7 @@
  *   Phase 9  — Enable interrupts + start userland
  */
 #include <kernel.h>
+#include <kernel/version.h>
 #include <types.h>
 #include <multiboot2.h>
 #include <memory.h>
@@ -70,7 +71,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
     print_banner();
 
     debug_puts("[boot] Kernel entered 64-bit long mode\n");
-    kinfo("Aether OS kernel starting — Services. Isolation. Trust.");
+    kinfo(OS_BANNER " — " OS_TAGLINE);
     kinfo("Multiboot2 info at %p", (void*)mb2_info);
 
     /* === Phase 2: Memory management === */
@@ -131,7 +132,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
     }
 
     /* === Phase 5: Aether OS Architectural Layer === */
-    kinfo("--- Aether OS Kernel Layer ---");
+    kinfo("--- " OS_NAME " Kernel Layer ---");
 
     kinfo("Initializing capability security table...");
     cap_table_init();
@@ -155,7 +156,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
         buddy_init(buddy_base_phys, buddy_base_virt, buddy_size);
     }
 
-    kinfo("--- Aether OS Kernel Layer ready ---");
+    kinfo("--- " OS_NAME " Kernel Layer ready ---");
     kinfo("  Capabilities : active=%u", cap_count());
     kinfo("  IPC ports    : initialized");
     kinfo("  Service bus  : initialized");
@@ -213,18 +214,17 @@ static void print_banner(void)
     vga_set_color(vga_make_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK));
     vga_puts(
         "\n"
-        "    ___       _   _                   ___  ____  \n"
-        "   / _ \\     | | | |                 / _ \\/ ___| \n"
-        "  / /_\\ \\ ___| |_| |__   ___ _ __  | | | \\___ \\ \n"
-        "  |  _  |/ _ \\ __| '_ \\ / _ \\ '__| | | | |___) |\n"
-        "  | | | |  __/ |_| | | |  __/ |    | |_| |____/ \n"
-        "  \\_| |_/\\___|\\__|_| |_|\\___|_|     \\___/       \n"
+        "    _____  __  __              ____   ____  \n"
+        "   /  _  |/ _||_ |__  ___  _ / __ \\ / ___| \n"
+        "  | |_| || |_  | '_ \\/ _ \\| |  |  \\\___ \\  \n"
+        "  |  _  ||  _| | | | | __/| |  |__/ ___) | \n"
+        "  |_| |_||_|   |_| |_|\\___||_|\\_____/____/  \n"
         "\n"
     );
 
     vga_set_color(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-    vga_printf("  Aether OS v0.1 | x86_64 | Hybrid Microkernel\n");
-    vga_printf("  Services. Isolation. Trust.\n\n");
+    vga_printf("  " OS_BANNER " | " OS_ARCH " | " OS_KERNEL_TYPE "\n");
+    vga_printf("  " OS_TAGLINE "\n\n");
 
     vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
 }
@@ -269,7 +269,7 @@ static void init_userland(void)
 {
     extern void init_process_entry(void);
 
-    kinfo("=== Aether OS — Starting Services ===");
+    kinfo("=== " OS_BANNER " — Starting Services ===");
 
     kinfo("Creating init process...");
     process_t* init = process_create("init", init_process_entry, false);
@@ -317,7 +317,7 @@ static void init_userland(void)
         klog_warn("  [FAIL] launcher thread creation failed");
     }
 
-    kinfo("=== Aether OS — All services started ===");
+    kinfo("=== " OS_NAME " — All services started ===");
     kinfo("  Service bus: %u registered services", svcbus_count());
     kinfo("  Capabilities: %u active", cap_count());
     secmon_dump_log(5);

@@ -1,11 +1,12 @@
-# Aether OS — Architecture & Design Document
+# AetherOS — Architecture & Design Document
 
 ## Identity
 
-**Name**: Aether OS
-**Version**: 0.1.0 "Genesis"
+**Name**: AetherOS
+**Version**: 1.0.0 "Genesis"
 **Tagline**: *Services. Isolation. Trust.*
 **Architecture**: Hybrid Microkernel with Capability-Based Security
+**Canonical branding**: `include/kernel/version.h`
 
 ---
 

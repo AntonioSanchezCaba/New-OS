@@ -11,6 +11,7 @@
  *   - Scrolling with keyboard (PgUp/PgDn) [cosmetic]
  */
 #include <gui/window.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/event.h>
 #include <gui/theme.h>
@@ -141,9 +142,9 @@ static void term_redraw(wid_t wid)
     /* Input row at bottom */
     int iy = TERM_PAD + (TERM_ROWS - 1) * FONT_H;
 
-    /* user@aetheros:/cwd$ */
+    /* user@hostname:/cwd$ */
     const char* user = "user";
-    const char* host = "aetheros";
+    const char* host = OS_HOSTNAME;
     int px = TERM_PAD;
     draw_string(&c, px, iy, user, TERM_OK, TERM_BG);
     px += (int)strlen(user) * FONT_W;
@@ -182,7 +183,7 @@ static void term_redraw(wid_t wid)
     time_str[8] = '\0';
 
     draw_string(&c, 4, sb_y + 1,
-                "Aether OS Terminal  |  Type 'help' for commands",
+                OS_NAME " Terminal  |  Type 'help' for commands",
                 TERM_STATUS_FG, rgba(0,0,0,0));
     draw_string(&c, c.width - 9 * FONT_W - 4, sb_y + 1,
                 time_str, TERM_STATUS_FG, rgba(0,0,0,0));
@@ -209,7 +210,7 @@ static int tokenize(char* line, char** argv, int max_args)
 
 static void cmd_help(term_t* t)
 {
-    term_puts(t, "Aether OS Terminal — Built-in commands:\n", TERM_HDR);
+    term_puts(t, OS_NAME " Terminal — Built-in commands:\n", TERM_HDR);
     const char* cmds[] = {
         "  help          - Show this help",
         "  clear         - Clear screen",
@@ -414,13 +415,13 @@ static void cmd_date(term_t* t)
     uint32_t s2 =  secs         % 60;
     term_printf(t, TERM_FG, "System time (since boot): %02u:%02u:%02u\n",
                 h2, m2, s2);
-    term_puts(t, "Date: 2025 (RTC not yet implemented)\n", TERM_DIM);
+    term_puts(t, "Date: " OS_YEAR " (RTC not yet implemented)\n", TERM_DIM);
 }
 
 static void cmd_uname(term_t* t)
 {
     term_printf(t, TERM_FG,
-                "Aether OS 0.1.0 aetheros x86_64 Hybrid-Microkernel\n");
+                OS_NAME " " OS_VERSION " " OS_HOSTNAME " " OS_ARCH " " OS_KERNEL_TYPE "\n");
 }
 
 static void cmd_whoami(term_t* t)
@@ -430,18 +431,18 @@ static void cmd_whoami(term_t* t)
 
 static void cmd_hostname(term_t* t)
 {
-    term_puts(t, "aetheros\n", TERM_FG);
+    term_puts(t, OS_HOSTNAME "\n", TERM_FG);
 }
 
 static void cmd_env(term_t* t)
 {
     term_puts(t, "HOME=/home/user\n", TERM_FG);
     term_puts(t, "USER=user\n", TERM_FG);
-    term_puts(t, "HOSTNAME=aetheros\n", TERM_FG);
+    term_puts(t, "HOSTNAME=" OS_HOSTNAME "\n", TERM_FG);
     term_printf(t, TERM_FG, "PWD=%s\n", t->cwd);
     term_puts(t, "SHELL=/bin/ash\n", TERM_FG);
-    term_puts(t, "OS=AetherOS\n", TERM_FG);
-    term_puts(t, "TERM=aether-term\n", TERM_FG);
+    term_puts(t, "OS=" OS_NAME "\n", TERM_FG);
+    term_puts(t, "TERM=" OS_TERM_NAME "\n", TERM_FG);
 }
 
 static void cmd_kill(term_t* t, const char* pid_s)
@@ -686,7 +687,7 @@ static void term_on_event(wid_t wid, gui_event_t* evt, void* ud)
             t->hist_nav = -1;
         } else if (kc == KEY_ENTER || ch == '\n' || ch == '\r') {
             /* Echo input line */
-            term_puts(t, "user@aetheros:", TERM_OK);
+            term_puts(t, "user@" OS_HOSTNAME ":", TERM_OK);
             term_puts(t, t->cwd, TERM_DIR);
             term_puts(t, "$ ", TERM_PROMPT);
             term_puts(t, t->input, TERM_FG);
@@ -738,7 +739,7 @@ wid_t app_terminal_create(void)
     t->hist_nav       = -1;
     strncpy(t->cwd, "/", 2);
 
-    wid_t wid = wm_create_window("Terminal — Aether OS",
+    wid_t wid = wm_create_window("Terminal — " OS_NAME,
                                   50, 40, TERM_W, TERM_H,
                                   term_on_event, NULL);
     if (wid < 0) { kfree(t); return -1; }
@@ -747,10 +748,8 @@ wid_t app_terminal_create(void)
     g_term  = t;
 
     /* Welcome banner */
-    term_printf(t, TERM_HDR,
-                "Aether OS Terminal  |  v0.1 \"Genesis\"\n");
-    term_printf(t, TERM_DIM,
-                "Architecture: x86_64 Hybrid Microkernel\n");
+    term_puts(t, OS_TERM_BANNER "\n", TERM_HDR);
+    term_puts(t, OS_ARCH " — " OS_KERNEL_TYPE "\n", TERM_DIM);
     term_printf(t, TERM_FG,
                 "Type 'help' to list built-in commands.\n\n");
     term_redraw(wid);

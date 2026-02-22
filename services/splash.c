@@ -5,6 +5,7 @@
  * Runs as a blocking call in gui_run() before the desktop loads.
  */
 #include <services/splash.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/theme.h>
 #include <drivers/framebuffer.h>
@@ -75,8 +76,8 @@ static void splash_draw_frame(canvas_t* screen, int progress_pct)
     }
 
     /* OS version subtitle */
-    const char* sub1 = "Aether OS  v0.1  \"Genesis\"";
-    const char* sub2 = "Services. Isolation. Trust.";
+    const char* sub1 = OS_BANNER;
+    const char* sub2 = OS_TAGLINE;
     int sub1_w = (int)strlen(sub1) * FONT_W;
     int sub2_w = (int)strlen(sub2) * FONT_W;
 
@@ -115,7 +116,7 @@ static void splash_draw_frame(canvas_t* screen, int progress_pct)
                 g_status, th->splash_text, rgba(0,0,0,0));
 
     /* Copyright footer */
-    const char* copy = "Aether OS Project — 2025";
+    const char* copy = OS_COPYRIGHT;
     int copy_w = (int)strlen(copy) * FONT_W;
     draw_string(screen, cx - copy_w / 2, H - FONT_H - 12,
                 copy, rgba(0x30, 0x50, 0x80, 0x80), rgba(0,0,0,0));
@@ -162,7 +163,7 @@ void splash_run(void)
 
     /* Final: full bar */
     g_progress = 100;
-    g_status   = "Welcome to Aether OS";
+    g_status   = OS_BOOT_WELCOME;
     splash_draw_frame(&screen, 100);
     fb_flip();
 

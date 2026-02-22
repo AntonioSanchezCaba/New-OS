@@ -14,6 +14,7 @@
  *   - Theme-aware colors
  */
 #include <gui/window.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/event.h>
 #include <gui/theme.h>
@@ -469,7 +470,7 @@ wid_t app_filemanager_create(void)
     memset(f, 0, sizeof(fm_t));
     f->last_clicked = -1;
 
-    wid_t wid = wm_create_window("File Manager — Aether OS",
+    wid_t wid = wm_create_window("File Manager — " OS_NAME,
                                   90, 70, FM_W, FM_H,
                                   fm_on_event, NULL);
     if (wid < 0) { kfree(f); return -1; }

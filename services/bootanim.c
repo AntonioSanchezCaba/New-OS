@@ -12,6 +12,7 @@
  *   - Smooth fade-in / fade-out transitions
  */
 #include <services/bootanim.h>
+#include <kernel/version.h>
 #include <drivers/framebuffer.h>
 #include <drivers/timer.h>
 #include <gui/draw.h>
@@ -189,8 +190,8 @@ void bootanim_render(void)
         int cx = (int)w / 2;
         int ty = (int)h / 2 + 30;
 
-        const char* title    = "Aureon OS";
-        const char* subtitle = "Loading your experience...";
+        const char* title    = OS_BOOT_LINE1;
+        const char* subtitle = OS_BOOT_LINE2;
 
         int tw = (int)strlen(title)    * 10;
         int sw = (int)strlen(subtitle) * 7;

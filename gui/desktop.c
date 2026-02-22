@@ -11,6 +11,7 @@
  *   - Virtual workspace indicator (4 workspaces, cosmetic)
  */
 #include <gui/gui.h>
+#include <kernel/version.h>
 #include <gui/window.h>
 #include <gui/draw.h>
 #include <gui/event.h>
@@ -92,7 +93,7 @@ static void draw_desktop_bg(void)
         draw_hline(&g_screen, 0, y, g_screen.width, grid);
 
     /* OS watermark bottom-right */
-    const char* wm_str = "Aether OS v0.1";
+    const char* wm_str = OS_BANNER_SHORT;
     int wlen = (int)strlen(wm_str) * FONT_W;
     draw_string(&g_screen,
                 g_screen.width  - wlen - 8,
@@ -117,7 +118,7 @@ void taskbar_draw(canvas_t* screen)
     uint32_t sbg = start_hov ? th->btn_hover : th->accent;
     draw_rect_rounded(screen, 4, wy + 4, START_BTN_W, TASKBAR_BTN_H, 3, sbg);
     draw_string_centered(screen, 4, wy + 4, START_BTN_W, TASKBAR_BTN_H,
-                         "Aether", th->btn_text, rgba(0,0,0,0));
+                         OS_SHORT_NAME, th->btn_text, rgba(0,0,0,0));
 
     /* === Virtual workspace indicator === */
     int wx = 4 + START_BTN_W + 6;
@@ -248,7 +249,7 @@ static void draw_start_menu(canvas_t* screen)
     /* Header */
     draw_rect(screen, menu_x, menu_y, MENU_W, 28, th->win_title_bg);
     draw_string(screen, menu_x + 8, menu_y + (28 - FONT_H) / 2,
-                "Aether OS", th->win_title_text, rgba(0,0,0,0));
+                OS_NAME, th->win_title_text, rgba(0,0,0,0));
     draw_hline(screen, menu_x, menu_y + 28, MENU_W, th->accent);
 
     int iy = menu_y + 32;
@@ -406,7 +407,7 @@ void gui_run(void)
 
     /* Phase C: Desktop init & initial apps */
     desktop_init();
-    notify_post(NOTIFY_INFO, "Welcome to Aether OS",
+    notify_post(NOTIFY_INFO, OS_BOOT_WELCOME,
                 "Desktop environment loaded.");
 
     /* Launch initial apps */

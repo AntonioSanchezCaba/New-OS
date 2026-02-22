@@ -7,6 +7,7 @@
  *   About     — Aether OS identity, version, license
  */
 #include <gui/window.h>
+#include <kernel/version.h>
 #include <gui/draw.h>
 #include <gui/event.h>
 #include <gui/theme.h>
@@ -242,14 +243,14 @@ static void draw_tab_about(canvas_t* c)
     y += 5 * FONT_H + 12;
 
     const struct { const char* k; const char* v; } info[] = {
-        { "Version",      "0.1.0 \"Genesis\""          },
+        { "Version",      OS_VERSION " — " OS_RELEASE   },
         { "Architecture", "Hybrid Microkernel"          },
         { "Security",     "Capability-Based"            },
         { "IPC",          "Message-Passing Ports"       },
         { "Display",      "Compositor-First"            },
         { "Memory",       "Buddy + Free-List Allocator" },
         { "Network",      "Custom TCP/IP Stack"         },
-        { "Tagline",      "Services. Isolation. Trust." },
+        { "Tagline",      OS_TAGLINE                   },
         { NULL, NULL }
     };
 
@@ -266,7 +267,7 @@ static void draw_tab_about(canvas_t* c)
 
     draw_hline(c, 8, y + 4, c->width - 16, th->panel_border);
     y += 12;
-    const char* copy = "Aether OS Project  |  Open Source  |  2025";
+    const char* copy = OS_PROJECT "  |  " OS_LICENSE "  |  " OS_YEAR;
     int cw = (int)strlen(copy) * FONT_W;
     draw_string(c, cx - cw/2, y, copy, th->text_disabled, rgba(0,0,0,0));
 }

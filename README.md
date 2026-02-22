@@ -1,184 +1,154 @@
-# Aether OS — 64-bit x86_64 Desktop Operating System
+# AetherOS v1.0.0 — "Genesis"
 
-A fully graphical desktop OS written from scratch in C and x86_64 NASM Assembly.
-Boots via Multiboot2/GRUB through a boot splash → login screen → full desktop
-environment with window manager, widget toolkit, and multiple applications.
+> **Services. Isolation. Trust.**
 
-> **Previously known as NovOS** — this is Aether OS v0.1 "Genesis".
+AetherOS is a 64-bit x86_64 desktop operating system written from scratch in C
+and NASM assembly. It is not a Linux fork, not a POSIX re-implementation, and
+not a teaching toy. It is a clean-sheet hybrid microkernel OS with a
+capability-based security model, a custom compositor, and a complete graphical
+desktop environment.
 
 ---
 
-## Architecture Overview
+## What Is AetherOS?
 
-### Boot Process
+AetherOS is built on three inviolable principles:
+
+1. **Every resource access requires a capability token** — there is no ambient
+   authority, no root user, no global permission table.
+2. **All inter-component communication uses structured message passing** — no
+   shared global state between services; IPC ports are the nervous system.
+3. **Every service is isolated and restartable** — a crashed display service
+   does not crash the kernel.
+
+The v1.0.0 "Genesis" release is the first feature-complete milestone: a fully
+bootable graphical desktop with a working window manager, compositor, and a
+suite of bundled applications.
+
+---
+
+## Architecture at a Glance
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      User Applications                        │
+│             (Terminal, Files, Editor, Settings...)            │
+├──────────────────────────────────────────────────────────────┤
+│                      GUI Toolkit / SDK                        │
+│          (draw.c, theme.c, widgets.c, window.c)               │
+├─────────────┬─────────────┬──────────────┬───────────────────┤
+│  Compositor │  Input Svc  │  VFS Service │  Network Service  │
+│  (display/) │  (input/)   │  (fs/)       │  (net/)           │
+├─────────────┴─────────────┴──────────────┴───────────────────┤
+│                   Service Bus (svcbus)                        │
+├─────────────┬──────────────┬─────────────┬───────────────────┤
+│  IPC Engine │  Capability  │   Security  │   Scheduler       │
+│  (ipc.c)    │  Table (cap) │   Monitor   │   (Round-Robin)   │
+├─────────────┴──────────────┴─────────────┴───────────────────┤
+│         Memory: PMM (buddy) + VMM (4-level paging) + Heap     │
+├──────────────────────────────────────────────────────────────┤
+│     Drivers: Framebuffer │ PS/2 │ PCI │ ATA │ e1000 │ Timer  │
+├──────────────────────────────────────────────────────────────┤
+│                  x86_64 + GRUB / Multiboot2                   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Genesis Feature Set (v1.0.0)
+
+### Kernel
+
+| Subsystem          | Status | Notes                                          |
+|--------------------|--------|------------------------------------------------|
+| x86_64 long mode   | ✅     | 4-level page tables, higher-half kernel        |
+| Memory management  | ✅     | PMM bitmap + buddy, VMM COW, free-list heap    |
+| IDT / IRQ          | ✅     | PIC 8259, timer, keyboard, mouse               |
+| Scheduler          | ✅     | Round-robin preemptive, 100 Hz PIT             |
+| Processes          | ✅     | fork/exec/waitpid, credentials, signal state   |
+| Signals            | ✅     | 32 POSIX signals, sigaction, sigprocmask       |
+| Syscall table      | ✅     | 50+ syscalls (int 0x80, 6-arg convention)      |
+| Capability system  | ✅     | Unforgeable tokens, derive, revoke, transfer   |
+| IPC engine         | ✅     | Typed message ports, sync/async, zero-copy     |
+| Service bus        | ✅     | Name registry, capability distribution         |
+| Shared memory      | ✅     | Named regions, ref-counted, multi-space map    |
+| TTY/PTY            | ✅     | Line discipline, cooked/raw, PTY pairs         |
+| Package manager    | ✅     | .aur archive format, CRC32, DB persistence     |
+
+### Filesystem
+
+| Driver             | Status | Notes                                          |
+|--------------------|--------|------------------------------------------------|
+| VFS layer          | ✅     | Unified interface, stat, readdir, mount        |
+| ramfs              | ✅     | In-memory, dynamic growth, pre-populated tree  |
+| ext2               | ✅     | Read/write, indirect blocks, in-memory image   |
+| FAT32              | ✅     | BPB parsing, FAT chain, LFN skeleton           |
+
+### Networking
+
+| Component          | Status | Notes                                          |
+|--------------------|--------|------------------------------------------------|
+| e1000 driver       | ✅     | Intel Gigabit (QEMU emulated)                  |
+| ARP                | ✅     | Request/reply, cache                           |
+| IP layer           | ✅     | Fragmentation, routing                         |
+| ICMP               | ✅     | Ping echo request/reply                        |
+| UDP                | ✅     | Sockets, send/recv                             |
+| TCP                | ✅     | 3-way handshake, data transfer, teardown       |
+| BSD socket API     | ✅     | socket/bind/connect/listen/accept/send/recv    |
+
+### Graphics & Desktop
+
+| Component          | Status | Notes                                          |
+|--------------------|--------|------------------------------------------------|
+| Framebuffer        | ✅     | Double-buffered, 32bpp ARGB, damage tracking   |
+| Compositor         | ✅     | Surface-based, Z-order, alpha blend, shadows   |
+| Window manager     | ✅     | Move, resize, minimize, focus, Z-raise         |
+| Theme engine       | ✅     | Dark/light, 4 accents, 60+ named color fields  |
+| Widget toolkit     | ✅     | Button, Label, TextInput, CheckBox, ProgressBar|
+| Boot animation     | ✅     | Integer sine table, smooth fade-in/out phases  |
+| Boot splash        | ✅     | Branded progress bar, phase labels             |
+| Login screen       | ✅     | Username/password fields, blinking cursor      |
+| Desktop + Taskbar  | ✅     | Start menu, virtual workspaces, system tray    |
+| Notifications      | ✅     | Toast popups, auto-dismiss, typed severity     |
+
+### Applications
+
+| Application        | Key Features                                                  |
+|--------------------|---------------------------------------------------------------|
+| Terminal           | 22 built-in commands, history (↑/↓), VFS navigation          |
+| File Manager       | Two-pane, sidebar, double-click nav, delete confirmation      |
+| Text Editor        | Multi-line, line numbers, gutter, cursor, scrollback          |
+| System Monitor     | CPU %, memory bar, live process list                          |
+| Settings           | Display, system stats, about tabs; theme/accent switching     |
+| Calculator         | 4-function, %, negate, keyboard input                         |
+| Clock              | Analog + digital face, uptime display                         |
+| Stress Test        | 6 scheduler workers, fairness bars, heap statistics           |
+
+---
+
+## Boot Flow
 
 ```
 BIOS/UEFI
-   └─► GRUB (Multiboot2)
-          └─► boot.asm (_start, 32-bit protected mode)
-                 ├─ Verify Multiboot2 magic
-                 ├─ Set up 4-level page tables (identity + higher-half map)
-                 │    PML4[0]   → PDPT → PD (identity map 0–1GB)
-                 │    PML4[511] → PDPT → PD (kernel at 0xFFFFFFFF80000000)
-                 ├─ Enable PAE + Long Mode (EFER.LME) + Paging
-                 ├─ Load 64-bit GDT
-                 └─► long_mode_entry (64-bit)
-                        ├─ Set up segment registers
-                        ├─ Switch to kernel virtual stack
-                        └─► kernel_main()
-```
-
-### Virtual Memory Layout
-
-```
-Virtual Address Space (x86_64, 48-bit):
-┌──────────────────────────────────────┐ 0xFFFFFFFFFFFFFFFF
-│  Kernel heap                         │ 0xFFFFFFFF90000000 - 0xFFFFFFFFA0000000
-│  Kernel image (text/data/bss)        │ 0xFFFFFFFF80100000
-│  Kernel VMA base                     │ 0xFFFFFFFF80000000
-├──────────────────────────────────────┤
-│  (non-canonical hole)                │
-├──────────────────────────────────────┤ 0x00007FFFFFFFFFFF
-│  User stack (grows down)             │ 0x00007FFFFFFFE000
-│  User heap  (grows up via brk)       │
-│  User ELF segments (text/data/bss)   │ 0x0000000000400000
-│  (not mapped)                        │ 0x0000000000000000
-└──────────────────────────────────────┘
-```
-
-### Memory Management
-
-**Physical Memory Manager (PMM)** — `memory/pmm.c`
-- Bitmap allocator: 1 bit per 4KB frame
-- Initialized from Multiboot2 memory map
-- `pmm_alloc_frame()` / `pmm_free_frame()`
-
-**Virtual Memory Manager (VMM)** — `memory/vmm.c`
-- 4-level page tables: PML4 → PDPT → PD → PT
-- Supports 2MB huge pages for early kernel mapping
-- `vmm_map_page()`, `vmm_clone_address_space()` (for fork)
-- Copy-on-write address space cloning
-
-**Kernel Heap** — `memory/heap.c`
-- Free-list allocator with block coalescing
-- `kmalloc()`, `kfree()`, `krealloc()`, `kcalloc()`
-- Expands by mapping new physical frames on demand
-
-### Interrupt Handling
-
-```
-CPU Exception / IRQ fires
-   └─► ISR stub (isr.asm) — saves all GP registers to stack frame
-          └─► interrupt_dispatch() (handlers.c)
-                 ├─► handle_exception() — CPU exceptions 0–31
-                 │    └─► vmm_handle_page_fault() for #PF
-                 ├─► handle_irq() — hardware IRQs 32–47
-                 │    ├─ IRQ0 → timer_irq_handler()
-                 │    ├─ IRQ1 → keyboard_irq_handler()
-                 │    └─ IRQ14/15 → ATA interrupts
-                 └─► syscall_handler() — int 0x80
-```
-
-- **IDT**: 256 gates, 64-bit interrupt gates
-- **PIC**: Intel 8259 remapped to vectors 0x20–0x2F
-- **GDT/TSS**: 7-entry GDT with 64-bit TSS for kernel stack on ring-3 interrupts
-
-### Process Scheduler
-
-**Round-Robin Preemptive Scheduler** — `scheduler/scheduler.c`
-- Circular ready queue (array-based, O(1) enqueue/dequeue)
-- Time quantum: 5 timer ticks (50ms at 100Hz)
-- Preemption: PIT timer IRQ calls `scheduler_tick()` every 10ms
-- Context switch saves/restores: RBX, RBP, R12–R15, RSP, RIP, RFLAGS
-
-**Process Control Block** — `process/process.c`
-- Unique PID, parent PID, process name
-- Separate kernel stack (16KB) per process
-- Own page table (PML4) for address space isolation
-- File descriptor table (64 entries)
-- States: CREATED → READY → RUNNING → SLEEPING/WAITING → ZOMBIE → DEAD
-
-**Context Switching** — `process/context.asm`
-- `context_switch(old, new)`: saves current context to `old`, loads `new`
-- `switch_to_usermode(rip, rsp)`: transitions to ring 3 via IRETQ
-
-### System Calls (int 0x80)
-
-| # | Name    | Args                    | Description              |
-|---|---------|-------------------------|--------------------------|
-| 0 | read    | fd, buf, count          | Read from file/stdin     |
-| 1 | write   | fd, buf, count          | Write to file/stdout     |
-| 2 | open    | path, flags, mode       | Open file                |
-| 3 | close   | fd                      | Close file descriptor    |
-|10 | fork    | —                       | Clone process            |
-|11 | exec    | path, argv, envp        | Execute ELF binary       |
-|12 | exit    | code                    | Terminate process        |
-|13 | getpid  | —                       | Get current PID          |
-|14 | sleep   | ms                      | Sleep for N milliseconds |
-|15 | kill    | pid, sig                | Kill process             |
-| 9 | brk     | new_brk                 | Set heap end (sbrk)      |
-|23 | yield   | —                       | Voluntary CPU yield      |
-
-### Filesystem (VFS + ramfs + EXT2)
-
-**VFS Layer** — `fs/vfs.c`
-- Unified interface for any backing filesystem
-- Path resolution with `/`-separated components
-- Standard operations: open, close, read, write, readdir, mkdir, create, unlink
-
-**RAM Filesystem** — `fs/ramfs.c`
-- In-memory filesystem backed by kernel heap
-- Files stored as `uint8_t*` arrays (grow dynamically)
-- Directories store up to 64 children
-- Pre-populated at boot: `/bin`, `/etc`, `/dev`, `/proc`, `/tmp`, `/home`
-
-**EXT2 Read-Only Driver** — `fs/ext2.c`
-- Parses EXT2 (Second Extended Filesystem) disk images in memory
-- Supports direct, single-indirect, double-indirect, triple-indirect blocks
-- Block group descriptor table traversal, inode lookup by number
-- Mounts as a VFS subtree (e.g. `/media/disk0`) via `ext2_init()`
-- Compatible with `mkfs.ext2` formatted images
-
-### Drivers
-
-| Driver     | File                  | Description                          |
-|------------|-----------------------|--------------------------------------|
-| VGA        | `drivers/vga.c`       | 80×25 text mode, scrolling, color    |
-| Keyboard   | `drivers/keyboard.c`  | PS/2 scancode set 1, ring buffer     |
-| Timer      | `drivers/timer.c`     | PIT 8254, 100Hz, drives scheduler    |
-| Serial     | `drivers/serial.c`    | 16550 UART, 115200 baud, debug out   |
-| ATA        | `drivers/ata.c`       | ATA PIO, LBA28/LBA48, 4 drives       |
-
----
-
-## Directory Structure
-
-```
-NovOS/
-├── boot/           Multiboot2 header, 32→64 mode transition, GDT
-├── kernel/         Kernel main, panic handler, logging
-├── memory/         PMM (bitmap), VMM (4-level paging), heap allocator
-├── interrupts/     IDT setup, PIC driver, ISR stubs, exception handlers
-├── process/        PCB management, ELF loader, context switching
-├── scheduler/      Round-robin preemptive scheduler
-├── syscall/        System call table and implementations
-├── drivers/        VGA, keyboard, timer, serial, ATA
-├── fs/             VFS layer, RAM filesystem
-├── userland/       Init process, interactive shell
-├── libc/           Freestanding string.h, printf implementations
-├── include/        All public headers
-├── scripts/        Cross-compiler build helper
-├── Makefile        Build system
-└── linker.ld       Kernel linker script
+  └─► GRUB (Multiboot2)
+         └─► boot.asm  (32-bit → 64-bit long mode transition)
+                └─► kernel_main()
+                       ├─ Phase 1: PMM + VMM + Heap
+                       ├─ Phase 2: IDT + PIC + Timer + Interrupts
+                       ├─ Phase 3: Drivers (FB, keyboard, mouse, PCI, net)
+                       ├─ Phase 4: Kernel services (cap, ipc, svcbus, secmon)
+                       ├─ Phase 5: Core services (compositor, input, launcher)
+                       └─► gui_run()
+                              ├─ splash_run()  — AetherOS boot splash
+                              ├─ login_run()   — graphical login
+                              └─► Desktop loop (~60 FPS)
 ```
 
 ---
 
-## Build Instructions
+## Building AetherOS
 
 ### Prerequisites
-
-Install cross-compiler and build tools:
 
 ```bash
 # Ubuntu / Debian
@@ -186,153 +156,110 @@ sudo apt install build-essential bison flex libgmp-dev libmpc-dev \
                  libmpfr-dev texinfo libisl-dev nasm grub-common \
                  xorriso qemu-system-x86
 
-# macOS (Homebrew)
+# macOS
 brew install gmp mpfr libmpc nasm xorriso qemu
-brew install x86_64-elf-gcc  # Available in OSDev tap
 ```
 
-### Build the cross-compiler (first time)
+### Cross-compiler (first time only)
 
 ```bash
 bash scripts/build_cross.sh
 export PATH="$HOME/cross/bin:$PATH"
 ```
 
-### Build NovOS
+### Build and Run
 
 ```bash
-make          # Build kernel.elf and novos.iso
-make run      # Build and launch in QEMU
+make              # Build kernel.elf + aetheros.iso
+make run          # Build and launch in QEMU (graphical window)
+make debug        # QEMU paused + GDB server on :1234
 ```
 
-### QEMU Run Command (manual)
+### Manual QEMU Launch
 
 ```bash
-qemu-system-x86_64 \
-    -cdrom build/novos.iso \
-    -m 256M               \
-    -serial stdio         \
-    -no-reboot            \
-    -no-shutdown
-```
-
-### Debug with GDB
-
-```bash
-make debug    # Starts QEMU paused, GDB server on port 1234
-# In another terminal:
-x86_64-elf-gdb build/kernel.elf
-(gdb) target remote localhost:1234
-(gdb) break kernel_main
-(gdb) continue
-```
-
----
-
-## Shell Commands
-
-Once booted, the interactive shell supports:
-
-| Command          | Description                      |
-|------------------|----------------------------------|
-| `help`           | List all commands                |
-| `ls [path]`      | List directory contents          |
-| `cat <file>`     | Display file contents            |
-| `echo [text...]` | Print text to screen             |
-| `ps`             | List all running processes       |
-| `kill <pid>`     | Kill a process by PID            |
-| `clear`          | Clear the screen                 |
-| `cd <path>`      | Change directory                 |
-| `pwd`            | Print current directory          |
-| `mkdir <path>`   | Create a directory               |
-| `touch <file>`   | Create an empty file             |
-| `rm <file>`      | Remove a file                    |
-| `uptime`         | Show system uptime               |
-| `mem`            | Show memory usage statistics     |
-| `halt`           | Halt the system                  |
-| `reboot`         | Reboot via keyboard controller   |
-
----
-
-## Implementation Notes
-
-### Why Multiboot2?
-Multiboot2 is the easiest way to get GRUB to load a kernel without writing a full bootloader. GRUB handles the BIOS/UEFI complexity and gives us a clean 32-bit protected mode environment to start from.
-
-### Higher-half Kernel
-The kernel is linked at `0xFFFFFFFF80100000` but physically loaded at `0x100000`. This separates kernel virtual memory from user virtual memory, preventing user processes from directly accessing kernel code/data.
-
-### No Red Zone
-The `-mno-red-zone` flag is critical for kernel code. The "red zone" is a 128-byte area below RSP that userland code can use freely. Interrupts would corrupt this area in kernel mode without this flag.
-
-### No SSE/MMX
-We disable SSE/MMX/AVX with `-mno-sse -mno-mmx` because these instructions require the FPU to be initialized (CR0.EM must be clear, CR4.OSFXSR must be set), and they use XMM registers that we don't save/restore in our context switch code.
-
-### Locking
-Spinlocks and critical sections use `cli`/`sti` to disable interrupts. For a proper SMP kernel, atomic operations and per-CPU structures would be needed.
-
----
-
-## Graphical Desktop (Aether OS Extensions)
-
-### Boot Flow
-```
-GRUB → kernel_main() → GUI init → splash_run() → login_run() → desktop loop
-```
-
-### GUI Subsystem
-
-**Framebuffer & Compositor** — `drivers/framebuffer.c`, `gui/draw.c`
-- Double-buffered VESA linear framebuffer (32-bit ARGB)
-- Alpha-blending: `fb_blend()` for translucent effects
-- Primitives: filled/outlined rect, circle, rounded rect, gradient, blit, scroll
-
-**Window Manager** — `gui/window_manager.c`
-- Up to 32 simultaneous windows, Z-ordered array
-- Title bar with focus gradient, close button (×)
-- Mouse-drag to move (title bar grab), drag to resize (corner/edge handles)
-- Drop shadows (translucent offset rectangle behind each window)
-- Event routing: mouse hit-test front-to-back, keyboard to focused window
-
-**Theme Engine** — `gui/theme.c`, `include/gui/theme.h`
-- Runtime dark/light switching, 4 accent colours (Blue, Purple, Green, Red)
-- 60+ named color fields covering all GUI components
-- All components read from `theme_current()` — zero hard-coded colors in apps
-
-**Widget Toolkit** — `gui/widgets.c`, `include/gui/widgets.h`
-- `widget_group_t` holds up to 64 widgets per window
-- Widget types: Button, Label, TextInput, CheckBox, ProgressBar, Separator
-- TextInput: cursor, selection scroll, password masking, insert/delete/arrow keys
-- `widget_group_handle_event()` returns triggered widget ID for clean callbacks
-
-**Notification System** — `gui/notify.c`, `include/gui/notify.h`
-- Toast popups at top-right, up to 5 stacked
-- Types: Info, Warning, Error (colored stripe)
-- Auto-dismiss with animated countdown progress bar
-
-### Applications
-
-| App            | File                   | Key Features                                    |
-|----------------|------------------------|-------------------------------------------------|
-| Terminal       | `apps/terminal.c`      | 22 commands, command history (↑/↓), VFS nav    |
-| File Manager   | `apps/filemanager.c`   | Two-pane, double-click nav, delete confirm      |
-| Text Editor    | `apps/texteditor.c`    | Basic editor, line display                      |
-| System Monitor | `apps/sysmonitor.c`    | CPU %, memory bar, process list                 |
-| Settings       | `apps/settings.c`      | Theme, accent, memory, about tabs               |
-| Calculator     | `apps/calculator.c`    | 4-function + %, negate, keyboard input          |
-| Clock          | `apps/clock.c`         | Analog face + digital, uptime display           |
-| Stress Test    | `apps/stress_test.c`   | 6 workers, scheduler fairness bars, heap stats  |
-
-### QEMU Run (with VGA graphics)
-```bash
-qemu-system-x86_64 \
-  -cdrom build/novos.iso \
-  -m 256M \
-  -vga std \
-  -serial stdio \
-  -netdev user,id=net0 \
+qemu-system-x86_64          \
+  -cdrom build/aetheros.iso \
+  -m 256M                   \
+  -vga std                  \
+  -serial stdio             \
+  -netdev user,id=net0      \
   -device e1000,netdev=net0 \
   -no-reboot -no-shutdown
 ```
-The VGA window shows the graphical desktop.  Serial output on stdio shows
-kernel debug logs.
+
+The VGA window shows the graphical desktop. Serial/stdio shows kernel debug logs.
+
+---
+
+## Repository Structure
+
+```
+New-IOS/
+├── boot/           Multiboot2 header, 32→64 mode, GDT/TSS setup
+├── kernel/         kernel_main, panic, logging, cap, ipc, svcbus, secmon
+│                   pkg (package manager), shm, tty, signal
+├── memory/         PMM (bitmap + buddy), VMM (4-level), heap allocator
+├── interrupts/     IDT, PIC, ISR stubs, exception handlers
+├── process/        PCB, ELF loader, context switch, fork/exec/waitpid
+├── scheduler/      Round-robin preemptive scheduler
+├── syscall/        Syscall table (50+ entries), all implementations
+├── drivers/        Framebuffer, keyboard, mouse, timer, serial, ATA, e1000
+├── fs/             VFS layer, ramfs, ext2, fat32
+├── net/            ARP, IP, ICMP, UDP, TCP, BSD socket API
+├── display/        Compositor, surface management, damage tracking
+├── input/          Input service, focus management, event dispatch
+├── gui/            Window manager, draw primitives, theme, widgets, notify
+├── services/       Boot animation, splash, login, launcher
+├── apps/           Terminal, file manager, text editor, system monitor,
+│                   settings, calculator, clock, stress test
+├── userland/       Init process, interactive shell
+├── libc/           Freestanding string.h, printf, vsnprintf
+├── include/        All public headers (kernel/version.h is canonical)
+├── scripts/        Cross-compiler build helper
+├── Makefile        Build system
+└── linker.ld       Kernel linker script
+```
+
+---
+
+## Versioning
+
+All branding strings are defined in a single header:
+
+```c
+// include/kernel/version.h  — single source of truth
+#define OS_NAME      "AetherOS"
+#define OS_VERSION   "1.0.0"
+#define OS_RELEASE   "Genesis"
+#define OS_TAGLINE   "Services. Isolation. Trust."
+#define OS_COPYRIGHT "© 2026 AetherOS Project"
+```
+
+No subsystem, application, or service may hardcode these values. All must
+`#include <kernel/version.h>` and use the macros.
+
+---
+
+## Roadmap
+
+| Version | Milestone                                                         |
+|---------|-------------------------------------------------------------------|
+| v1.1    | User-space driver model (ring-3 services with MMU isolation)      |
+| v1.2    | Persistent ext4 filesystem, boot from real disk                   |
+| v1.3    | Audio service (PCM mixing, beep driver)                           |
+| v2.0    | ARM64 port (Raspberry Pi 4/5 target)                              |
+| v2.1    | RISC-V port                                                       |
+| v3.0    | Self-hosting: AetherOS builds AetherOS                            |
+
+---
+
+## License
+
+© 2026 AetherOS Project — Open Source
+
+---
+
+*"A system that cannot explain why it gave you access is a system that cannot
+explain why it denied you access."*
+— AetherOS Design Principle #1

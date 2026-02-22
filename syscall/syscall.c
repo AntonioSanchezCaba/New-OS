@@ -22,6 +22,7 @@
 #include <kernel/signal.h>
 #include <kernel/shm.h>
 #include <kernel/ipc.h>
+#include <kernel/version.h>
 #include <kernel/pkg.h>
 #include <net/socket.h>
 #include <gui/window.h>
@@ -540,11 +541,11 @@ int64_t sys_uname(uint64_t buf_addr, uint64_t a2, uint64_t a3,
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
     utsname_t* u = (utsname_t*)buf_addr;
     if (!u) return -EFAULT;
-    strncpy(u->sysname,  "Aureon",  64);
-    strncpy(u->nodename, "aureon",  64);
-    strncpy(u->release,  "1.0.0",   64);
-    strncpy(u->version,  "2026",    64);
-    strncpy(u->machine,  "x86_64",  64);
+    strncpy(u->sysname,  UNAME_SYSNAME,  64);
+    strncpy(u->nodename, UNAME_NODENAME, 64);
+    strncpy(u->release,  UNAME_RELEASE,  64);
+    strncpy(u->version,  UNAME_VERSION,  64);
+    strncpy(u->machine,  UNAME_MACHINE,  64);
     return 0;
 }
 
