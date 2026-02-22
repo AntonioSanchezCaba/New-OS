@@ -21,6 +21,9 @@
 /* Bitmap: 1 bit per frame. MAX_FRAMES / 8 bytes total. */
 static uint8_t pmm_bitmap[MAX_FRAMES / 8];
 
+/* Reference counts: 1 byte per frame (saturates at 255). */
+static uint8_t pmm_refcounts[MAX_FRAMES];
+
 /* Statistics */
 static size_t pmm_total_frame_count = 0;
 static size_t pmm_used_frame_count  = 0;
@@ -152,6 +155,7 @@ void pmm_init(struct multiboot2_info* mb2_info)
  *
  * Returns the physical address of the frame, or NULL if out of memory.
  * Simple linear scan (can be optimized with a buddy system or free list).
+ * The frame's reference count is initialised to 1.
  */
 void* pmm_alloc_frame(void)
 {
@@ -163,6 +167,7 @@ void* pmm_alloc_frame(void)
             uint64_t frame = byte * 8 + bit;
             if (!pmm_test_bit(frame)) {
                 pmm_set_bit(frame);
+                pmm_refcounts[frame] = 1;
                 pmm_used_frame_count++;
                 return (void*)(frame * PMM_FRAME_SIZE);
             }
@@ -176,6 +181,7 @@ void* pmm_alloc_frame(void)
  * pmm_alloc_frames - allocate @count contiguous physical frames.
  *
  * Returns the base physical address, or NULL if not enough contiguous memory.
+ * Each allocated frame's reference count is initialised to 1.
  */
 void* pmm_alloc_frames(size_t count)
 {
@@ -193,6 +199,7 @@ void* pmm_alloc_frames(size_t count)
                 /* Found a contiguous run - mark them all used */
                 for (size_t i = start; i < start + count; i++) {
                     pmm_set_bit(i);
+                    pmm_refcounts[i] = 1;
                     pmm_used_frame_count++;
                 }
                 return (void*)(start * PMM_FRAME_SIZE);
@@ -208,16 +215,24 @@ void* pmm_alloc_frames(size_t count)
 /*
  * pmm_free_frame - release a previously allocated 4KB physical frame.
  * @frame: physical address (must be page-aligned)
+ *
+ * Decrements the reference count; only actually frees when it reaches 0.
  */
 void pmm_free_frame(void* frame)
 {
     uint64_t f = (uint64_t)frame / PMM_FRAME_SIZE;
     if (f >= MAX_FRAMES) return;
 
-    if (pmm_test_bit(f)) {
-        pmm_clear_bit(f);
-        pmm_used_frame_count--;
+    if (!pmm_test_bit(f)) return; /* Already free */
+
+    if (pmm_refcounts[f] > 1) {
+        pmm_refcounts[f]--;
+        return; /* Still referenced by another mapping */
     }
+
+    pmm_refcounts[f] = 0;
+    pmm_clear_bit(f);
+    pmm_used_frame_count--;
 }
 
 /*
@@ -225,13 +240,43 @@ void pmm_free_frame(void* frame)
  */
 void pmm_free_frames(void* frame, size_t count)
 {
-    uint64_t base = (uint64_t)frame / PMM_FRAME_SIZE;
-    for (size_t i = 0; i < count && (base + i) < MAX_FRAMES; i++) {
-        if (pmm_test_bit(base + i)) {
-            pmm_clear_bit(base + i);
-            pmm_used_frame_count--;
-        }
+    for (size_t i = 0; i < count; i++) {
+        pmm_free_frame((void*)((uint64_t)frame + i * PMM_FRAME_SIZE));
     }
+}
+
+/* ============================================================
+ * Reference counting API (used by COW)
+ * ============================================================ */
+
+/*
+ * pmm_ref_frame - increment the reference count of a physical frame.
+ * Used when a page is shared copy-on-write.
+ */
+void pmm_ref_frame(uint64_t phys)
+{
+    uint64_t f = phys / PMM_FRAME_SIZE;
+    if (f >= MAX_FRAMES) return;
+    if (pmm_refcounts[f] < 255) /* saturate at 255 */
+        pmm_refcounts[f]++;
+}
+
+/*
+ * pmm_unref_frame - decrement the reference count, freeing if it hits 0.
+ */
+void pmm_unref_frame(uint64_t phys)
+{
+    pmm_free_frame((void*)phys);
+}
+
+/*
+ * pmm_get_refcount - return the current reference count of a frame.
+ */
+uint8_t pmm_get_refcount(uint64_t phys)
+{
+    uint64_t f = phys / PMM_FRAME_SIZE;
+    if (f >= MAX_FRAMES) return 0;
+    return pmm_refcounts[f];
 }
 
 size_t pmm_free_frames_count(void)

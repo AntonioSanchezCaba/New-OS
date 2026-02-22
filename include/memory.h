@@ -28,6 +28,11 @@ size_t pmm_total_frames(void);
 void   pmm_mark_used(uint64_t addr, size_t size);
 void   pmm_mark_free(uint64_t addr, size_t size);
 
+/* PMM reference counting (for COW) */
+void    pmm_ref_frame(uint64_t phys);
+void    pmm_unref_frame(uint64_t phys);
+uint8_t pmm_get_refcount(uint64_t phys);
+
 /* ========== Paging / VMM ========== */
 
 /* Page table entry flags */
@@ -40,6 +45,9 @@ void   pmm_mark_free(uint64_t addr, size_t size);
 #define PTE_DIRTY       (1ULL << 6)
 #define PTE_HUGE        (1ULL << 7)
 #define PTE_GLOBAL      (1ULL << 8)
+/* Available bits 9-11 used for OS software flags */
+#define PTE_COW         (1ULL << 9)   /* Copy-on-write shared page */
+#define PTE_GUARD       (1ULL << 10)  /* Guard page (stack overflow sentinel) */
 #define PTE_NX          (1ULL << 63)
 
 /* Address mask for page table entries */
@@ -51,9 +59,19 @@ void   pmm_mark_free(uint64_t addr, size_t size);
 #define USER_SPACE_END      0x00007FFFFFFFFFFFULL
 #define USER_STACK_TOP      0x00007FFFFFFFE000ULL
 #define USER_STACK_SIZE     (8 * 1024 * 1024) /* 8MB user stack */
+/* Guard page sits one page below the stack mapping */
+#define USER_STACK_GUARD    (USER_STACK_TOP - USER_STACK_SIZE - PAGE_SIZE)
 
 #define KERNEL_HEAP_START   0xFFFFFFFF90000000ULL
 #define KERNEL_HEAP_END     0xFFFFFFFFA0000000ULL
+
+/* User pointer validation: check ptr is within user space */
+#define IS_USER_PTR(p)  ((uint64_t)(p) >= USER_SPACE_START && \
+                         (uint64_t)(p) <  USER_SPACE_END)
+#define VALIDATE_USER_PTR(p, len) \
+    ((uint64_t)(p) >= USER_SPACE_START && \
+     (uint64_t)(p) + (uint64_t)(len) <= USER_SPACE_END && \
+     (uint64_t)(p) + (uint64_t)(len) >= (uint64_t)(p))
 
 /* Page table level indices from virtual address */
 #define PML4_INDEX(vaddr)   (((vaddr) >> 39) & 0x1FF)
@@ -81,7 +99,11 @@ int    vmm_map_page(page_table_t* pml4, uint64_t vaddr, uint64_t paddr, uint64_t
 int    vmm_unmap_page(page_table_t* pml4, uint64_t vaddr);
 uint64_t vmm_get_physical(page_table_t* pml4, uint64_t vaddr);
 int    vmm_map_range(page_table_t* pml4, uint64_t vaddr, uint64_t paddr, size_t size, uint64_t flags);
+
+/* COW-aware clone for fork() */
 page_table_t* vmm_clone_address_space(page_table_t* src);
+/* Map a guard page (triggers fault on access) */
+int    vmm_map_guard_page(page_table_t* pml4, uint64_t vaddr);
 void   vmm_handle_page_fault(uint64_t fault_addr, uint64_t error_code);
 
 /* Kernel page table (used at boot) */
