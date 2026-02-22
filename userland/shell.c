@@ -52,7 +52,7 @@ static void cmd_help(int argc, char** argv)
 {
     (void)argc; (void)argv;
     shell_puts(
-        "NovOS Shell - built-in commands:\n"
+        "AetherOS Shell - built-in commands:\n"
         "  help              - Show this help\n"
         "  ls [path]         - List directory contents\n"
         "  cat <file>        - Display file contents\n"
@@ -396,13 +396,13 @@ void shell_run(void)
 
     shell_puts("\n");
     vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    shell_puts("NovOS shell ready. Type 'help' for available commands.\n\n");
+    shell_puts("AetherOS shell ready. Type 'help' for available commands.\n\n");
     vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
 
     while (1) {
         /* Print prompt */
         vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-        shell_printf("root@novos:%s", cwd);
+        shell_printf("root@aetheros:%s", cwd);
         vga_set_color(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
         shell_puts("# ");
         vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));

@@ -10,9 +10,9 @@
 #include <types.h>
 #include <string.h>
 
-/* Kernel version information */
-#define KERNEL_NAME    "NovOS"
-#define KERNEL_VERSION "0.1.0"
+/* Kernel version information (canonical strings live in kernel/version.h) */
+#define KERNEL_NAME    "AetherOS"
+#define KERNEL_VERSION "1.0.0"
 #define KERNEL_ARCH    "x86_64"
 
 /* Log levels */
@@ -31,6 +31,12 @@
 #define kinfo(fmt, ...)       klog(LOG_INFO,  fmt, ##__VA_ARGS__)
 #define kwarn(fmt, ...)       klog(LOG_WARN,  fmt, ##__VA_ARGS__)
 #define kerror(fmt, ...)      klog(LOG_ERROR, fmt, ##__VA_ARGS__)
+
+/* Aliases used throughout subsystem drivers */
+#define klog_debug  kdebug
+#define klog_info   kinfo
+#define klog_warn   kwarn
+#define klog_error  kerror
 
 /* Kernel panic - prints message and halts the system */
 #define kpanic(fmt, ...) kernel_panic(__FILE__, __LINE__, fmt, ##__VA_ARGS__)

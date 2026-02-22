@@ -8,6 +8,7 @@
 #define FS_VFS_H
 
 #include <types.h>
+#include <errno.h>
 
 /* File type flags */
 #define VFS_FILE        0x01

@@ -5,6 +5,7 @@
 #define NET_NET_H
 
 #include <types.h>
+#include <errno.h>
 
 /* MAC address */
 typedef struct { uint8_t b[6]; } mac_addr_t;

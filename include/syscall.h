@@ -1,5 +1,5 @@
 /*
- * syscall.h - System call numbers and interface for Aureon OS
+ * syscall.h - System call numbers and interface for AetherOS
  *
  * System calls are invoked from userspace via "int 0x80".
  * RAX = syscall number; args in RDI, RSI, RDX, R10, R8, R9.
@@ -10,6 +10,7 @@
 
 #include <types.h>
 #include <interrupts.h>
+#include <errno.h>
 
 /* ── File I/O (0..29) ────────────────────────────────────────────────── */
 #define SYS_READ        0
@@ -139,56 +140,7 @@
 
 #define MAX_SYSCALLS    256
 
-/* ── errno values ────────────────────────────────────────────────────── */
-#define ESUCCESS        0
-#define EPERM           1
-#define ENOENT          2
-#define ESRCH           3
-#define EINTR           4
-#define EIO             5
-#define ENXIO           6
-#define E2BIG           7
-#define ENOEXEC         8
-#define EBADF           9
-#define ECHILD          10
-#define EAGAIN          11
-#define ENOMEM          12
-#define EACCES          13
-#define EFAULT          14
-#define EBUSY           16
-#define EEXIST          17
-#define EXDEV           18
-#define ENODEV          19
-#define ENOTDIR         20
-#define EISDIR          21
-#define EINVAL          22
-#define ENFILE          23
-#define EMFILE          24
-#define ENOTTY          25
-#define EFBIG           27
-#define ENOSPC          28
-#define ESPIPE          29
-#define EPIPE           32
-#define ERANGE          34
-#define ENOSYS          38
-#define ENOTEMPTY       39
-#define ENOTSOCK        88
-#define EDESTADDRREQ    89
-#define EMSGSIZE        90
-#define EPROTOTYPE      91
-#define ENOPROTOOPT     92
-#define EPROTONOSUPPORT 93
-#define EOPNOTSUPP      95
-#define ENOTSUP         95
-#define EAFNOSUPPORT    97
-#define EADDRINUSE      98
-#define EADDRNOTAVAIL   99
-#define ECONNRESET      104
-#define ENOBUFS         105
-#define EISCONN         106
-#define ENOTCONN        107
-#define ETIMEDOUT       110
-#define ECONNREFUSED    111
+/* errno values are defined in <errno.h> (already included above) */
 
 /* ── stat structure ──────────────────────────────────────────────────── */
 typedef struct {
@@ -237,7 +189,7 @@ typedef struct {
 
 /* uname */
 typedef struct {
-    char sysname[65];   /* "Aureon" */
+    char sysname[65];   /* "Aether" */
     char nodename[65];  /* hostname */
     char release[65];   /* "1.0.0" */
     char version[65];   /* Build date */

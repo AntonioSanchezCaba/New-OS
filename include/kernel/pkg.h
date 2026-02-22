@@ -1,5 +1,5 @@
 /*
- * include/kernel/pkg.h - Aureon OS Package Manager (APM)
+ * include/kernel/pkg.h - AetherOS Package Manager (APM)
  *
  * A lightweight package management layer embedded in the kernel.
  * Packages are self-contained archives stored on the FAT32 or ramfs.

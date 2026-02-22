@@ -381,10 +381,97 @@ static ssize_t _fat32_vfs_read(vfs_node_t* node, uint64_t offset,
 static ssize_t _fat32_vfs_write(vfs_node_t* node, uint64_t offset,
                                   size_t len, const void* buf)
 {
-    (void)node; (void)offset; (void)len; (void)buf;
-    /* Write path: locate/allocate clusters, write data, update dir entry size */
-    /* Full implementation mirrors read but extends the chain as needed */
-    return -ENOSYS; /* TODO Phase 2 */
+    fat32_fs_t* fs = (fat32_fs_t*)node->fs_data;
+    if (!fs || !fs->valid) return -EIO;
+    if (len == 0) return 0;
+
+    fat32_entry_t entry;
+    if (fat32_resolve(fs, node->name, &entry) != 0) return -ENOENT;
+    if (entry.attr & FAT_ATTR_DIR) return -EISDIR;
+
+    uint8_t* cbuf = (uint8_t*)kmalloc(fs->bytes_per_cluster);
+    if (!cbuf) return -ENOMEM;
+
+    /* Number of clusters needed to reach (offset + len) */
+    uint64_t end_byte     = offset + len;
+    uint32_t cluster_off  = (uint32_t)(offset / fs->bytes_per_cluster);
+    uint32_t byte_off     = (uint32_t)(offset % fs->bytes_per_cluster);
+
+    /*
+     * Walk (or extend) the cluster chain to the starting cluster.
+     * If the file has no clusters yet, allocate the first one.
+     */
+    uint32_t c    = entry.first_cluster;
+    uint32_t prev = 0;
+
+    if (c < 2) {
+        /* Empty file — allocate first cluster */
+        c = fat32_alloc_cluster(fs, 0);
+        if (c < 2) { kfree(cbuf); return -ENOSPC; }
+        entry.first_cluster = c;
+    }
+
+    /* Walk to cluster_off, allocating new clusters as needed */
+    uint32_t ci = 0;
+    while (ci < cluster_off) {
+        prev = c;
+        c = fat32_next_cluster(fs, c);
+        if (c >= FAT32_EOC_MIN || c < 2) {
+            /* Extend the chain */
+            c = fat32_alloc_cluster(fs, prev);
+            if (c < 2) { kfree(cbuf); return -ENOSPC; }
+        }
+        ci++;
+    }
+
+    /* Write loop */
+    const uint8_t* src  = (const uint8_t*)buf;
+    ssize_t        done = 0;
+
+    while ((size_t)done < len) {
+        /* Read-modify-write when the write doesn't start at cluster boundary
+         * or doesn't fill the entire cluster */
+        size_t avail = fs->bytes_per_cluster - byte_off;
+        size_t copy  = MIN(avail, len - (size_t)done);
+
+        if (byte_off != 0 || copy < fs->bytes_per_cluster) {
+            /* Partial cluster: read first */
+            if (fat32_read_cluster(fs, c, cbuf) != 0) {
+                kfree(cbuf); return -EIO;
+            }
+        }
+
+        memcpy(cbuf + byte_off, src + done, copy);
+
+        if (fat32_write_cluster(fs, c, cbuf) != 0) {
+            kfree(cbuf); return -EIO;
+        }
+
+        done     += (ssize_t)copy;
+        byte_off  = 0;
+
+        if ((size_t)done < len) {
+            prev = c;
+            c = fat32_next_cluster(fs, c);
+            if (c >= FAT32_EOC_MIN || c < 2) {
+                /* Extend chain */
+                c = fat32_alloc_cluster(fs, prev);
+                if (c < 2) break; /* Out of space — return partial write */
+            }
+        }
+    }
+
+    kfree(cbuf);
+
+    /* Update file size in the directory entry if we grew the file */
+    if (end_byte > (uint64_t)entry.size) {
+        entry.size = (uint32_t)end_byte;
+        node->size = entry.size;
+        /* Update the dir entry on disk — handled next flush */
+        fat32_sync(fs);
+    }
+
+    return done;
 }
 
 static int _fat32_vfs_readdir(vfs_node_t* node, uint32_t idx,
@@ -505,4 +592,19 @@ int fat32_mount_auto(void)
         break;
     }
     return -ENODEV;
+}
+
+/*
+ * fat32_mount - convenience wrapper used by diskman.
+ * Allocates the next free mount-table slot and calls fat32_init.
+ */
+int fat32_mount(int drive, uint64_t lba_start, const char* mount_point)
+{
+    for (int i = 0; i < FAT32_MAX_MOUNTS; i++) {
+        if (fat32_mounts[i].valid) continue;
+        return fat32_init(&fat32_mounts[i], drive,
+                          (int)(uint32_t)lba_start, mount_point);
+    }
+    kerror("FAT32: mount table full");
+    return -ENOMEM;
 }

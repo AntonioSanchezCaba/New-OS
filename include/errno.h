@@ -1,0 +1,63 @@
+/*
+ * include/errno.h — AetherOS kernel error codes
+ *
+ * These values match the POSIX/Linux errno numbers so that userland
+ * programs compiled with a standard libc can use them without translation.
+ * Every kernel source file that returns -errno should include this header.
+ *
+ * NOTE: Do not include <syscall.h> just to get error codes — use this.
+ */
+#pragma once
+
+#define ESUCCESS         0
+#define EPERM            1   /* Operation not permitted */
+#define ENOENT           2   /* No such file or directory */
+#define ESRCH            3   /* No such process */
+#define EINTR            4   /* Interrupted system call */
+#define EIO              5   /* I/O error */
+#define ENXIO            6   /* No such device or address */
+#define E2BIG            7   /* Argument list too long */
+#define ENOEXEC          8   /* Exec format error */
+#define EBADF            9   /* Bad file number */
+#define ECHILD          10   /* No child processes */
+#define EAGAIN          11   /* Try again */
+#define ENOMEM          12   /* Out of memory */
+#define EACCES          13   /* Permission denied */
+#define EFAULT          14   /* Bad address */
+#define EBUSY           16   /* Device or resource busy */
+#define EEXIST          17   /* File exists */
+#define EXDEV           18   /* Cross-device link */
+#define ENODEV          19   /* No such device */
+#define ENOTDIR         20   /* Not a directory */
+#define EISDIR          21   /* Is a directory */
+#define EINVAL          22   /* Invalid argument */
+#define ENFILE          23   /* File table overflow */
+#define EMFILE          24   /* Too many open files */
+#define ENOTTY          25   /* Not a typewriter */
+#define EFBIG           27   /* File too large */
+#define ENOSPC          28   /* No space left on device */
+#define ESPIPE          29   /* Illegal seek */
+#define EPIPE           32   /* Broken pipe */
+#define ERANGE          34   /* Math result not representable */
+#define ENOSYS          38   /* Function not implemented */
+#define ENOTEMPTY       39   /* Directory not empty */
+#define ETIMEDOUT       110  /* Connection timed out */
+#define ENOTSOCK        88   /* Socket operation on non-socket */
+#define EDESTADDRREQ    89   /* Destination address required */
+#define EMSGSIZE        90   /* Message too long */
+#define EPROTOTYPE      91   /* Protocol wrong type for socket */
+#define ENOPROTOOPT     92   /* Protocol not available */
+#define EPROTONOSUPPORT 93   /* Protocol not supported */
+#define EOPNOTSUPP      95   /* Operation not supported on transport endpoint */
+#define ENOTSUP         95   /* Not supported */
+#define EAFNOSUPPORT    97   /* Address family not supported by protocol */
+#define EADDRINUSE      98   /* Address already in use */
+#define EADDRNOTAVAIL   99   /* Cannot assign requested address */
+#define ECONNRESET      104  /* Connection reset by peer */
+#define ENOBUFS         105  /* No buffer space available */
+#define EISCONN         106  /* Transport endpoint is already connected */
+#define ENOTCONN        107  /* Transport endpoint is not connected */
+#define ECONNREFUSED    111  /* Connection refused */
+#define EHOSTUNREACH    113  /* No route to host */
+#define EALREADY        114  /* Operation already in progress */
+#define EINPROGRESS     115  /* Operation now in progress */

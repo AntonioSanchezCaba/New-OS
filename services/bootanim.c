@@ -1,5 +1,5 @@
 /*
- * services/bootanim.c - Aureon OS Boot Animation
+ * services/bootanim.c - AetherOS Boot Animation
  *
  * A polished boot screen that runs between POST and the desktop.
  * Renders directly to the framebuffer before the compositor is up.
@@ -7,7 +7,7 @@
  * Visual design:
  *   - Deep navy background (#0A0E1A)
  *   - Animated circular "loading ring" (sweep from 0° → 360°)
- *   - "Aureon" logotype rendered in white below the ring
+ *   - "Aether" logotype rendered in white below the ring
  *   - Thin progress bar at the bottom edge
  *   - Smooth fade-in / fade-out transitions
  */

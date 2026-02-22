@@ -262,14 +262,14 @@ vfs_node_t* ramfs_create_root(void)
 
     /* /etc/motd - message of the day */
     const char* motd =
-        "\nWelcome to NovOS!\n"
+        "\nWelcome to AetherOS!\n"
         "A 64-bit operating system written in C and Assembly.\n"
         "Type 'help' for a list of commands.\n\n";
     vfs_node_t* etc = ramfs_finddir(&root->vnode, "etc");
     if (etc) ramfs_add_file(etc, "motd", motd, strlen(motd), 0444);
 
     /* /etc/hostname */
-    const char* hostname = "novos\n";
+    const char* hostname = "aetheros\n";
     if (etc) ramfs_add_file(etc, "hostname", hostname, strlen(hostname), 0444);
 
     /* /dev/null - null device */

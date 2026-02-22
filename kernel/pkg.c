@@ -1,5 +1,5 @@
 /*
- * kernel/pkg.c - Aureon OS Package Manager (APM)
+ * kernel/pkg.c - AetherOS Package Manager (APM)
  *
  * Manages installation and removal of .aur package archives.
  * The package database is stored as a binary blob at /sys/packages/db.

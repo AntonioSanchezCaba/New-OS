@@ -172,5 +172,6 @@ void fat32_unmount(fat32_fs_t* fs);
 #define FAT32_MAX_MOUNTS 4
 extern fat32_fs_t fat32_mounts[FAT32_MAX_MOUNTS];
 int fat32_mount_auto(void);   /* Auto-detect and mount first FAT32 partition */
+int fat32_mount(int drive, uint64_t lba_start, const char* mount_point);
 
 #endif /* FS_FAT32_H */

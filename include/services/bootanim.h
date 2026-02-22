@@ -7,7 +7,7 @@
  * Sequence:
  *   1. Fade-in from black
  *   2. Logo appears (animated circle sweep)
- *   3. "Aureon OS" text fades in below logo
+ *   3. "AetherOS" text fades in below logo
  *   4. Progress bar fills as kernel services initialize
  *   5. Fade-out to desktop
  *
