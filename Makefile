@@ -193,7 +193,18 @@ C_SRCS := \
     net/dhcp.c                  \
     net/dns.c                   \
     apps/imgviewer.c            \
-    apps/netconfig.c
+    apps/netconfig.c            \
+    aether/surface.c            \
+    aether/input.c              \
+    aether/context.c            \
+    aether/field.c              \
+    aether/are.c                \
+    aether/ui.c                 \
+    surfaces/terminal.c         \
+    surfaces/explorer.c         \
+    surfaces/sysmon.c           \
+    surfaces/settings.c         \
+    surfaces/launcher.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \
@@ -233,6 +244,8 @@ dirs:
 	@mkdir -p $(BUILD)/input
 	@mkdir -p $(BUILD)/services
 	@mkdir -p $(BUILD)/mm
+	@mkdir -p $(BUILD)/aether
+	@mkdir -p $(BUILD)/surfaces
 	@mkdir -p $(GRUBDIR)
 
 # Compile C files

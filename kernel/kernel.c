@@ -57,6 +57,9 @@
 #include <gui/animation.h>
 #include <net/dhcp.h>
 
+/* Aether Render Engine */
+#include <aether/are.h>
+
 /* Kernel state */
 static kernel_state_t kernel_state = KERNEL_STATE_BOOT;
 
@@ -140,8 +143,8 @@ void kernel_main(struct multiboot2_info* mb2_info)
             wallpaper_init();
             kinfo("Initializing window animations...");
             anim_init();
-            kinfo("Initializing GUI subsystem...");
-            gui_init();
+            kinfo("Initializing Aether Render Engine...");
+            are_init();
         } else {
             klog_warn("Framebuffer init failed, GUI disabled");
         }
@@ -236,8 +239,12 @@ void kernel_main(struct multiboot2_info* mb2_info)
     /* === Phase 9: Launch userland === */
     init_userland();
 
-    /* The idle loop: scheduler will preempt this with real processes */
-    kinfo("Entering idle loop");
+    /* === Phase 10: Enter Aether Render Engine (replaces gui_run) === */
+    kinfo("Entering Aether Render Engine...");
+    are_run();  /* Returns only on are_shutdown() */
+
+    /* Fallback idle loop (should not be reached during normal operation) */
+    kinfo("ARE exited — entering idle loop");
     while (1) {
         cpu_halt();
     }

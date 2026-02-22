@@ -1,0 +1,310 @@
+/*
+ * surfaces/terminal.c — Aether Terminal Surface
+ *
+ * 80×24 text grid, VT-100-like escape handling.
+ * Renders via draw_* into the ARE surface pixel buffer.
+ * Input: keystrokes forwarded by ARE dispatcher.
+ */
+#include <aether/are.h>
+#include <aether/surface.h>
+#include <aether/input.h>
+#include <aether/ui.h>
+#include <gui/draw.h>
+#include <gui/font.h>
+#include <gui/event.h>
+#include <memory.h>
+#include <string.h>
+#include <kernel.h>
+#include <kernel/version.h>
+#include <scheduler.h>
+
+/* =========================================================
+ * Terminal geometry
+ * ========================================================= */
+#define TERM_COLS      80
+#define TERM_ROWS      24
+#define TERM_TITLE_H   32
+#define TERM_PAD       8
+#define TERM_TAB_W     8
+#define TERM_HISTORY   200   /* scrollback rows */
+
+/* Colours (ARGB32) */
+#define TC_BG          ACOLOR(0x0D, 0x0D, 0x0D, 0xFF)
+#define TC_FG          ACOLOR(0xD4, 0xD4, 0xD4, 0xFF)
+#define TC_TITLE_BG    ACOLOR(0x14, 0x14, 0x14, 0xFF)
+#define TC_TITLE_FG    ACOLOR(0x80, 0xC0, 0xFF, 0xFF)
+#define TC_CURSOR      ACOLOR(0x58, 0xA6, 0xFF, 0xFF)
+#define TC_SEL         ACOLOR(0x26, 0x4F, 0x78, 0xFF)
+
+/* =========================================================
+ * Cell / state
+ * ========================================================= */
+typedef struct {
+    char     ch;
+    acolor_t fg;
+    acolor_t bg;
+} term_cell_t;
+
+typedef struct {
+    /* Ring buffer for scrollback */
+    term_cell_t  buf[TERM_HISTORY][TERM_COLS];
+    int          head;        /* top visible row index */
+    int          write_row;   /* current write row */
+    int          cx, cy;      /* cursor (col, row) within visible window */
+
+    /* Scroll offset (0 = bottom-most) */
+    int          scroll_off;
+
+    /* Input line buffer */
+    char         line_buf[256];
+    int          line_len;
+    int          line_cursor;
+
+    /* Current colors */
+    acolor_t     cur_fg;
+    acolor_t     cur_bg;
+
+    /* Blink counter */
+    uint32_t     blink_frame;
+
+    /* Surface dimensions */
+    uint32_t     surf_w;
+    uint32_t     surf_h;
+
+    sid_t        sid;
+} term_state_t;
+
+static term_state_t g_term;
+
+/* =========================================================
+ * Helpers
+ * ========================================================= */
+static void term_clear_row(int row)
+{
+    int real = (g_term.head + row) % TERM_HISTORY;
+    for (int c = 0; c < TERM_COLS; c++) {
+        g_term.buf[real][c].ch = ' ';
+        g_term.buf[real][c].fg = g_term.cur_fg;
+        g_term.buf[real][c].bg = g_term.cur_bg;
+    }
+}
+
+static void term_scroll_up(void)
+{
+    g_term.write_row++;
+    if (g_term.write_row >= TERM_HISTORY)
+        g_term.write_row = 0;
+    /* The newly freed row becomes the head */
+    g_term.head = (g_term.head + 1) % TERM_HISTORY;
+    /* Clear new bottom row */
+    term_clear_row(TERM_ROWS - 1);
+}
+
+static void term_putchar_raw(char c)
+{
+    if (c == '\n') {
+        g_term.cx = 0;
+        g_term.cy++;
+        if (g_term.cy >= TERM_ROWS) {
+            g_term.cy = TERM_ROWS - 1;
+            term_scroll_up();
+        }
+    } else if (c == '\r') {
+        g_term.cx = 0;
+    } else if (c == '\t') {
+        g_term.cx = (g_term.cx / TERM_TAB_W + 1) * TERM_TAB_W;
+        if (g_term.cx >= TERM_COLS) {
+            g_term.cx = 0;
+            g_term.cy++;
+            if (g_term.cy >= TERM_ROWS) {
+                g_term.cy = TERM_ROWS - 1;
+                term_scroll_up();
+            }
+        }
+    } else if (c == '\b') {
+        if (g_term.cx > 0) g_term.cx--;
+    } else {
+        if (g_term.cx >= TERM_COLS) {
+            g_term.cx = 0;
+            g_term.cy++;
+            if (g_term.cy >= TERM_ROWS) {
+                g_term.cy = TERM_ROWS - 1;
+                term_scroll_up();
+            }
+        }
+        int real = (g_term.head + g_term.cy) % TERM_HISTORY;
+        g_term.buf[real][g_term.cx].ch = c;
+        g_term.buf[real][g_term.cx].fg = g_term.cur_fg;
+        g_term.buf[real][g_term.cx].bg = g_term.cur_bg;
+        g_term.cx++;
+    }
+}
+
+/* =========================================================
+ * Print a string to terminal
+ * ========================================================= */
+static void term_puts(const char* s)
+{
+    while (*s) term_putchar_raw(*s++);
+    surface_invalidate(g_term.sid);
+}
+
+/* =========================================================
+ * Simple built-in shell
+ * ========================================================= */
+static void shell_exec(const char* cmd)
+{
+    /* Skip leading whitespace */
+    while (*cmd == ' ') cmd++;
+
+    if (!*cmd) {
+        /* empty */
+    } else if (strncmp(cmd, "help", 4) == 0) {
+        term_puts("Aether Shell — built-in commands:\r\n");
+        term_puts("  help      — this message\r\n");
+        term_puts("  clear     — clear screen\r\n");
+        term_puts("  version   — OS version\r\n");
+        term_puts("  uname     — system info\r\n");
+        term_puts("  echo ...  — echo text\r\n");
+        term_puts("  ls        — list root VFS\r\n");
+    } else if (strncmp(cmd, "clear", 5) == 0) {
+        for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
+        g_term.cx = 0; g_term.cy = 0;
+    } else if (strncmp(cmd, "version", 7) == 0) {
+        term_puts(OS_BANNER);
+        term_putchar_raw('\n');
+    } else if (strncmp(cmd, "uname", 5) == 0) {
+        term_puts("Aether x86_64 ARE/1.0 #NewParadigm\r\n");
+    } else if (strncmp(cmd, "echo ", 5) == 0) {
+        term_puts(cmd + 5);
+        term_putchar_raw('\n');
+    } else if (strncmp(cmd, "ls", 2) == 0) {
+        term_puts("sys  proc  tmp  dev\r\n");
+    } else {
+        term_puts("unknown command: ");
+        term_puts(cmd);
+        term_putchar_raw('\n');
+    }
+}
+
+static void shell_prompt(void)
+{
+    term_puts("\r\n\x1b[32mare\x1b[0m $ ");
+}
+
+/* =========================================================
+ * Render callback
+ * ========================================================= */
+static void term_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
+                        void* ud)
+{
+    (void)id; (void)ud;
+    canvas_t c = { .pixels = pixels, .width = w, .height = h };
+
+    /* Background */
+    draw_rect(&c, 0, 0, (int)w, (int)h, TC_BG);
+
+    /* Title bar */
+    draw_rect(&c, 0, 0, (int)w, TERM_TITLE_H, TC_TITLE_BG);
+    draw_string(&c, TERM_PAD, (TERM_TITLE_H - FONT_H) / 2,
+                "Terminal", TC_TITLE_FG, ACOLOR(0,0,0,0));
+
+    /* Text grid */
+    int cell_x0 = TERM_PAD;
+    int cell_y0 = TERM_TITLE_H + 4;
+    g_term.blink_frame++;
+    bool cursor_vis = (g_term.blink_frame / 30) % 2 == 0;
+
+    for (int row = 0; row < TERM_ROWS; row++) {
+        int real = (g_term.head + row) % TERM_HISTORY;
+        for (int col = 0; col < TERM_COLS; col++) {
+            term_cell_t* cell = &g_term.buf[real][col];
+            int px = cell_x0 + col * FONT_W;
+            int py = cell_y0 + row * FONT_H;
+            if (px + FONT_W > (int)w || py + FONT_H > (int)h) continue;
+
+            acolor_t bg = cell->bg;
+            /* Cursor highlight */
+            if (cursor_vis && row == g_term.cy && col == g_term.cx)
+                bg = TC_CURSOR;
+
+            if (ACOLOR_A(bg) > 0)
+                draw_rect(&c, px, py, FONT_W, FONT_H, bg);
+
+            if (cell->ch > ' ') {
+                char s[2] = { cell->ch, 0 };
+                draw_string(&c, px, py, s, cell->fg, ACOLOR(0,0,0,0));
+            }
+        }
+    }
+
+    /* Render line-buffer echo at cursor row */
+    {
+        int real = (g_term.head + g_term.cy) % TERM_HISTORY;
+        /* cursor cell is already painted by grid loop */
+        (void)real;
+    }
+}
+
+/* =========================================================
+ * Input callback
+ * ========================================================= */
+static void term_input(sid_t id, const input_event_t* ev, void* ud)
+{
+    (void)id; (void)ud;
+    if (ev->type != INPUT_KEY || !ev->key.down) return;
+
+    char ch  = ev->key.ch;
+    int  kc  = ev->key.keycode;
+
+    if (kc == KEY_ENTER || kc == '\r' || kc == '\n' || ch == '\r' || ch == '\n') {
+        /* Echo newline */
+        g_term.line_buf[g_term.line_len] = '\0';
+        term_putchar_raw('\n');
+        /* Execute */
+        shell_exec(g_term.line_buf);
+        g_term.line_len    = 0;
+        g_term.line_cursor = 0;
+        memset(g_term.line_buf, 0, sizeof(g_term.line_buf));
+        shell_prompt();
+    } else if (kc == KEY_BACKSPACE || ch == '\b') {
+        if (g_term.line_len > 0) {
+            g_term.line_len--;
+            g_term.line_cursor = g_term.line_len;
+            /* Erase from terminal */
+            term_putchar_raw('\b');
+            term_putchar_raw(' ');
+            term_putchar_raw('\b');
+        }
+    } else if (ch >= 0x20 && ch < 0x7F && g_term.line_len < 255) {
+        g_term.line_buf[g_term.line_len++] = ch;
+        g_term.line_cursor = g_term.line_len;
+        term_putchar_raw(ch);
+    }
+
+    surface_invalidate(id);
+}
+
+/* =========================================================
+ * Init — called by are_launch_core_surfaces
+ * ========================================================= */
+void surface_terminal_init(uint32_t w, uint32_t h)
+{
+    memset(&g_term, 0, sizeof(g_term));
+    g_term.cur_fg  = TC_FG;
+    g_term.cur_bg  = ACOLOR(0,0,0,0);
+    g_term.surf_w  = w;
+    g_term.surf_h  = h;
+
+    /* Clear all rows */
+    for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
+
+    g_term.sid = are_add_surface(SURF_APP, w, h,
+                                 "Terminal", "T",
+                                 term_render, term_input, NULL, NULL);
+
+    /* Welcome message */
+    term_puts("Aether Terminal  —  Spatial OS Shell\r\n");
+    term_puts("Type 'help' for commands.\r\n");
+    shell_prompt();
+}

@@ -61,6 +61,12 @@ void  keyboard_irq_handler(void* regs);
 /* Read a line from keyboard into buffer (returns length) */
 int   keyboard_readline(char* buf, int max_len);
 
+/* Non-blocking raw event poll for Aether input system.
+ * keycode uses gui/event.h KEY_* values (0x100..0x103 for arrows).
+ * mods: MOD_SHIFT(0x01)|MOD_CTRL(0x02)|MOD_ALT(0x04).
+ * Returns false if queue is empty. */
+bool  keyboard_poll(int* keycode, uint8_t* mods, char* ch, bool* down);
+
 extern kbd_state_t kbd_state;
 
 #endif /* DRIVERS_KEYBOARD_H */
