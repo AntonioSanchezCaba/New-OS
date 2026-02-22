@@ -337,7 +337,7 @@ static int fat32_resolve(fat32_fs_t* fs, const char* path,
 static ssize_t _fat32_vfs_read(vfs_node_t* node, uint64_t offset,
                                 size_t len, void* buf)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->fs_data;
+    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
     if (!fs || !fs->valid) return -EIO;
 
     fat32_entry_t entry;
@@ -381,7 +381,7 @@ static ssize_t _fat32_vfs_read(vfs_node_t* node, uint64_t offset,
 static ssize_t _fat32_vfs_write(vfs_node_t* node, uint64_t offset,
                                   size_t len, const void* buf)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->fs_data;
+    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
     if (!fs || !fs->valid) return -EIO;
     if (len == 0) return 0;
 
@@ -477,7 +477,7 @@ static ssize_t _fat32_vfs_write(vfs_node_t* node, uint64_t offset,
 static int _fat32_vfs_readdir(vfs_node_t* node, uint32_t idx,
                                vfs_dirent_t* out)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->fs_data;
+    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
     if (!fs) return -EIO;
 
     fat32_entry_t entry;

@@ -15,6 +15,7 @@
 #include <kernel.h>
 #include <types.h>
 #include <string.h>
+#include <process.h>
 
 /* The kernel's root page table */
 page_table_t* kernel_pml4 = NULL;

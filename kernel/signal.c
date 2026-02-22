@@ -1,3 +1,4 @@
+#include <errno.h>
 /*
  * kernel/signal.c - POSIX signal subsystem
  *

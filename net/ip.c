@@ -46,23 +46,6 @@ void ip4_init(void)
 }
 
 /* =========================================================
- * Internet checksum
- * ========================================================= */
-
-uint16_t net_checksum(const void* data, size_t len)
-{
-    const uint16_t* p = (const uint16_t*)data;
-    uint32_t acc = 0;
-    while (len > 1) {
-        acc += *p++;
-        len -= 2;
-    }
-    if (len) acc += *(const uint8_t*)p;
-    while (acc >> 16) acc = (acc & 0xFFFF) + (acc >> 16);
-    return (uint16_t)~acc;
-}
-
-/* =========================================================
  * ARP
  * ========================================================= */
 
@@ -324,4 +307,31 @@ void icmp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len)
         /* Record last-received reply sequence so netconfig/ping can detect it */
         g_icmp_reply_seq = ntohs(icmp->seq);
     }
+}
+
+/* =========================================================
+ * IP address configuration API (called by DHCP, netconfig)
+ * ========================================================= */
+
+void ip_set_addr(ip4_addr_t addr)
+{
+    net_iface.ip = addr;
+    kinfo("IP: address set to %u.%u.%u.%u",
+          (addr >>  0) & 0xFF, (addr >>  8) & 0xFF,
+          (addr >> 16) & 0xFF, (addr >> 24) & 0xFF);
+}
+
+void ip_set_gateway(ip4_addr_t gw)
+{
+    net_iface.gateway = gw;
+}
+
+void ip_set_netmask(ip4_addr_t mask)
+{
+    net_iface.netmask = mask;
+}
+
+ip4_addr_t ip_get_addr(void)
+{
+    return net_iface.ip;
 }

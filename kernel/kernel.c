@@ -130,10 +130,12 @@ void kernel_main(struct multiboot2_info* mb2_info)
 
     if (fb_tag) {
         kinfo("Framebuffer: %ux%u %ubpp at 0x%llx",
-              fb_tag->width, fb_tag->height, fb_tag->bpp,
-              (unsigned long long)fb_tag->addr);
+              fb_tag->framebuffer_width, fb_tag->framebuffer_height,
+              fb_tag->framebuffer_bpp,
+              (unsigned long long)fb_tag->framebuffer_addr);
         /* Try UEFI GOP via Multiboot2 first */
-        uefi_gop_init(mb2_info);
+        gop_info_t gop_info;
+        uefi_gop_init(mb2_info, &gop_info);
         fb_init(fb_tag);
         if (fb_ready()) {
             kinfo("Initializing PS/2 mouse...");

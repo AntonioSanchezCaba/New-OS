@@ -408,9 +408,9 @@ bool          cursor_is_visible(void) { return g_cur.visible; }
  * ========================================================= */
 void cursor_erase(void)
 {
-    if (!g_cur.bg_saved || !fb.addr) return;
+    if (!g_cur.bg_saved || !fb.phys_addr) return;
 
-    uint32_t* fb_ptr = (uint32_t*)fb.addr;
+    uint32_t* fb_ptr = (uint32_t*)fb.phys_addr;
     int pitch = (int)(fb.pitch / 4);
 
     for (int row = 0; row < g_cur.bg_h; row++) {
@@ -430,7 +430,7 @@ void cursor_erase(void)
  * ========================================================= */
 void cursor_render(void)
 {
-    if (!g_cur.visible || !fb.addr) return;
+    if (!g_cur.visible || !fb.phys_addr) return;
     if (g_cur.type == CURSOR_NONE) return;
 
     const sprite_def_t* sp = &g_sprites[g_cur.type];
@@ -458,7 +458,7 @@ void cursor_render(void)
     g_cur.bg_h = draw_h;
     g_cur.bg_saved = true;
 
-    uint32_t* fb_ptr = (uint32_t*)fb.addr;
+    uint32_t* fb_ptr = (uint32_t*)fb.phys_addr;
     int pitch = (int)(fb.pitch / 4);
 
     for (int row = 0; row < draw_h; row++) {

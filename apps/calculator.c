@@ -60,8 +60,8 @@ typedef struct {
     wid_t          wid;
     widget_group_t wg;
 
-    double operand1;
-    double operand2;
+    long long operand1;
+    long long operand2;
     int    pending_op;   /* BID_PLUS/MINUS/MUL/DIV, or 0 */
     bool   entering_op2; /* True when user started entering second operand */
     bool   has_decimal;  /* Decimal point pressed */
@@ -75,86 +75,47 @@ typedef struct {
 static calc_t g_calc;
 
 /* =========================================================
- * Simple double -> string (no libc)
+ * Integer -> string (no floating point, SSE-safe)
  * ========================================================= */
 
-static void fmt_double(char* buf, int bufsz, double v)
+static void fmt_llong(char* buf, int bufsz, long long v)
 {
     if (bufsz <= 0) return;
-
-    /* Handle sign */
-    bool neg = (v < 0.0);
+    bool neg = (v < 0);
     if (neg) v = -v;
-
-    /* Separate integer and fractional parts */
-    long long ipart = (long long)v;
-    double    fpart = v - (double)ipart;
-
-    /* Format integer part */
-    char ibuf[24];
-    int  ilen = 0;
-    if (ipart == 0) {
-        ibuf[ilen++] = '0';
-    } else {
-        long long tmp = ipart;
-        while (tmp > 0 && ilen < 20) {
-            ibuf[ilen++] = '0' + (char)(tmp % 10);
-            tmp /= 10;
-        }
-        /* Reverse */
-        for (int i = 0; i < ilen / 2; i++) {
-            char c = ibuf[i];
-            ibuf[i] = ibuf[ilen - 1 - i];
-            ibuf[ilen - 1 - i] = c;
-        }
+    char tmp[24];
+    int  len = 0;
+    if (v == 0) { tmp[len++] = '0'; }
+    else {
+        while (v > 0 && len < 20) { tmp[len++] = '0' + (char)(v % 10); v /= 10; }
     }
-    ibuf[ilen] = '\0';
-
-    /* Format fractional part (up to 8 sig digits) */
-    char fbuf[12];
-    int  flen = 0;
-    fpart += 0.000000005; /* Round */
-    for (int i = 0; i < 8 && fpart > 0.0000000001; i++) {
-        fpart *= 10.0;
-        int digit = (int)fpart;
-        fbuf[flen++] = '0' + (char)digit;
-        fpart -= digit;
-    }
-    /* Strip trailing zeros */
-    while (flen > 0 && fbuf[flen - 1] == '0') flen--;
-    fbuf[flen] = '\0';
-
     int out = 0;
     if (neg && out < bufsz - 1) buf[out++] = '-';
-    for (int i = 0; i < ilen && out < bufsz - 1; i++) buf[out++] = ibuf[i];
-    if (flen > 0 && out < bufsz - 1) {
-        buf[out++] = '.';
-        for (int i = 0; i < flen && out < bufsz - 1; i++) buf[out++] = fbuf[i];
-    }
+    for (int i = len - 1; i >= 0 && out < bufsz - 1; i--) buf[out++] = tmp[i];
     buf[out] = '\0';
 }
 
 /* =========================================================
- * Calculator logic
+ * Calculator logic (integer arithmetic, no FP)
  * ========================================================= */
 
-static double apply_op(double a, double b, int op)
+static long long apply_op(long long a, long long b, int op)
 {
     if (op == BID_PLUS)  return a + b;
     if (op == BID_MINUS) return a - b;
     if (op == BID_MUL)   return a * b;
     if (op == BID_DIV) {
-        if (b == 0.0) return 0.0; /* Division by zero -> 0 (error set by caller) */
+        if (b == 0) return 0;
         return a / b;
     }
-    if (op == BID_PCT)   return (double)((long long)a % (long long)b);
+    if (op == BID_PCT && b != 0) return a % b;
     return b;
 }
 
 static void calc_reset(calc_t* c)
 {
-    c->operand1    = 0.0;
-    c->operand2    = 0.0;
+    c->operand1    = 0;
+    c->operand2    = 0;
     c->pending_op  = 0;
     c->entering_op2= false;
     c->has_decimal = false;
@@ -172,8 +133,8 @@ static void calc_press(calc_t* c, uint32_t bid)
     }
     if (bid == BID_CE) {
         strncpy(c->display, "0", sizeof(c->display) - 1);
-        if (c->entering_op2) { c->operand2 = 0.0; }
-        else                 { c->operand1 = 0.0; }
+        if (c->entering_op2) { c->operand2 = 0; }
+        else                 { c->operand1 = 0; }
         c->has_decimal = false;
         c->decimal_pos = 0;
         c->error       = false;
@@ -236,28 +197,22 @@ static void calc_press(calc_t* c, uint32_t bid)
     if (bid == BID_PLUS || bid == BID_MINUS ||
         bid == BID_MUL  || bid == BID_DIV)
     {
-        /* Parse current display into operand */
-        double cur = 0.0;
+        /* Parse current display into integer operand */
         bool neg2 = (c->display[0] == '-');
         const char* p = c->display + (neg2 ? 1 : 0);
-        while (*p && *p != '.') { cur = cur * 10.0 + (*p - '0'); p++; }
-        if (*p == '.') {
-            p++;
-            double frac = 0.1;
-            while (*p) { cur += (*p - '0') * frac; frac *= 0.1; p++; }
-        }
+        long long cur = 0;
+        while (*p && *p != '.') { cur = cur * 10 + (*p - '0'); p++; }
         if (neg2) cur = -cur;
 
         if (c->pending_op && c->entering_op2) {
-            /* Chain: eval previous op */
             c->operand2 = cur;
-            if (c->pending_op == BID_DIV && c->operand2 == 0.0) {
+            if (c->pending_op == BID_DIV && c->operand2 == 0) {
                 strncpy(c->display, "Error", sizeof(c->display) - 1);
                 c->error = true;
                 return;
             }
             c->operand1 = apply_op(c->operand1, c->operand2, c->pending_op);
-            fmt_double(c->display, (int)sizeof(c->display), c->operand1);
+            fmt_llong(c->display, (int)sizeof(c->display), c->operand1);
         } else {
             c->operand1 = cur;
         }
@@ -274,35 +229,28 @@ static void calc_press(calc_t* c, uint32_t bid)
     if (bid == BID_EQ) {
         if (!c->pending_op) return;
 
-        /* Parse second operand */
-        double cur = 0.0;
         bool neg2 = (c->display[0] == '-');
         const char* p = c->display + (neg2 ? 1 : 0);
-        while (*p && *p != '.') { cur = cur * 10.0 + (*p - '0'); p++; }
-        if (*p == '.') {
-            p++;
-            double frac = 0.1;
-            while (*p) { cur += (*p - '0') * frac; frac *= 0.1; p++; }
-        }
+        long long cur = 0;
+        while (*p && *p != '.') { cur = cur * 10 + (*p - '0'); p++; }
         if (neg2) cur = -cur;
 
         c->operand2 = c->entering_op2 ? cur : c->operand2;
 
-        if (c->pending_op == BID_DIV && c->operand2 == 0.0) {
+        if (c->pending_op == BID_DIV && c->operand2 == 0) {
             strncpy(c->display, "Error", sizeof(c->display) - 1);
             c->error      = true;
             c->pending_op = 0;
             return;
         }
 
-        double result = apply_op(c->operand1, c->operand2, c->pending_op);
-        fmt_double(c->display, (int)sizeof(c->display), result);
+        long long result = apply_op(c->operand1, c->operand2, c->pending_op);
+        fmt_llong(c->display, (int)sizeof(c->display), result);
         c->operand1    = result;
         c->entering_op2 = false;
         c->need_reset  = true;
         c->has_decimal = false;
         c->decimal_pos = 0;
-        /* Keep pending_op so repeated = applies same op */
         return;
     }
 }

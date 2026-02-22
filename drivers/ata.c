@@ -304,3 +304,14 @@ ata_drive_t* ata_get_drive(int bus, int drive)
     if (!ata_drives[idx].present) return NULL;
     return &ata_drives[idx];
 }
+
+/* Compatibility wrappers used by fat32.c and blockcache.c */
+int ata_read_sectors(ata_drive_t* drive, uint64_t lba, uint16_t count, void* buf)
+{
+    return ata_read(drive, lba, count, buf);
+}
+
+int ata_write_sectors(ata_drive_t* drive, uint64_t lba, uint16_t count, const void* buf)
+{
+    return ata_write(drive, lba, count, buf);
+}

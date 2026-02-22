@@ -17,6 +17,7 @@
 #include <drivers/vga.h>
 #include <drivers/timer.h>
 #include <drivers/framebuffer.h>
+#include <drivers/keyboard.h>
 #include <interrupts.h>
 #include <kernel.h>
 #include <kernel/signal.h>
@@ -763,5 +764,4 @@ void syscall_handler(cpu_registers_t* regs)
     }
 }
 
-/* External function referenced in keyboard.c */
-extern char keyboard_getchar(void);
+/* keyboard_getchar declared in <drivers/keyboard.h> */

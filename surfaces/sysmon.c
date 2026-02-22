@@ -5,6 +5,7 @@
  * Self-invalidates every frame by marking dirty in the render tick.
  */
 #include <aether/are.h>
+#include <gui/event.h>
 #include <aether/surface.h>
 #include <aether/input.h>
 #include <aether/ui.h>

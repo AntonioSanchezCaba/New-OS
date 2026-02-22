@@ -54,6 +54,11 @@ typedef int bool;
 #define ALWAYS_INLINE __attribute__((always_inline))
 #define NOINLINE    __attribute__((noinline))
 
+/* offsetof - byte offset of a member within a struct */
+#ifndef offsetof
+#define offsetof(type, member)  __builtin_offsetof(type, member)
+#endif
+
 /* Utility macros */
 #define ARRAY_SIZE(a)       (sizeof(a) / sizeof((a)[0]))
 #define ALIGN_UP(x, align)  (((x) + ((align) - 1)) & ~((align) - 1))

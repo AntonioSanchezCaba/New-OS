@@ -225,7 +225,7 @@ static void iv_draw(iv_t* iv, canvas_t* c)
         char zs[8]; fmt_int(zs,sizeof(zs),iv->zoom);
         strncat(zs,"%",sizeof(zs)-strlen(zs)-1);
         draw_string(c, 208, TB_BTN_Y+(TB_BTN_H-FONT_H)/2, zs,
-                    th->panel_text, rgba(0,0,0,0));
+                    th->btn_text, rgba(0,0,0,0));
     }
 
     /* Checkerboard */
@@ -274,7 +274,7 @@ static void iv_draw(iv_t* iv, canvas_t* c)
     } else {
         strncpy(status,"Keys: L=load  +/-=zoom  0=fit  1=1:1  Arrows=pan",sizeof(status)-1);
     }
-    draw_string(c, 6, sby+(IV_SB_H-FONT_H)/2, status, th->panel_text, rgba(0,0,0,0));
+    draw_string(c, 6, sby+(IV_SB_H-FONT_H)/2, status, th->btn_text, rgba(0,0,0,0));
 }
 
 /* =========================================================

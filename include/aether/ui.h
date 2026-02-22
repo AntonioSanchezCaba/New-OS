@@ -22,6 +22,7 @@
 #pragma once
 #include <types.h>
 #include <aether/vec.h>
+#include <aether/input.h>
 #include <gui/draw.h>
 
 struct ui_node;

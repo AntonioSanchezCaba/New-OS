@@ -1,3 +1,4 @@
+#include <errno.h>
 /*
  * kernel/shm.c - Shared memory subsystem
  *

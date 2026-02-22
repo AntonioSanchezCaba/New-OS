@@ -313,10 +313,52 @@ int udp_send(ip4_addr_t dst, uint16_t src_port, uint16_t dst_port,
     return ret;
 }
 
+/* =========================================================
+ * Simple single-slot UDP receive buffer per port
+ * ========================================================= */
+#define UDP_RX_SLOTS    4
+#define UDP_RX_BUF_SZ   2048
+
+typedef struct {
+    uint16_t port;
+    int      used;
+    int      len;
+    uint8_t  data[UDP_RX_BUF_SZ];
+} udp_rx_slot_t;
+
+static udp_rx_slot_t udp_rx[UDP_RX_SLOTS];
+
 void udp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len)
 {
     (void)ip_hdr;
     if (len < sizeof(udp_hdr_t)) return;
-    /* Incoming UDP: application layer would register handlers */
-    /* For now, silently drop */
+    const udp_hdr_t* hdr = (const udp_hdr_t*)segment;
+    uint16_t dst_port = ntohs(hdr->dst_port);
+    size_t   payload_len = len - sizeof(udp_hdr_t);
+    if (payload_len == 0 || payload_len > UDP_RX_BUF_SZ) return;
+    const uint8_t* payload = (const uint8_t*)segment + sizeof(udp_hdr_t);
+
+    /* Store in the first free slot matching this port (or any free slot) */
+    for (int i = 0; i < UDP_RX_SLOTS; i++) {
+        if (!udp_rx[i].used) {
+            udp_rx[i].port = dst_port;
+            udp_rx[i].len  = (int)payload_len;
+            memcpy(udp_rx[i].data, payload, payload_len);
+            udp_rx[i].used = 1;
+            return;
+        }
+    }
+}
+
+int udp_recv_poll(uint16_t local_port, void* buf, int bufsz)
+{
+    for (int i = 0; i < UDP_RX_SLOTS; i++) {
+        if (udp_rx[i].used && udp_rx[i].port == local_port) {
+            int n = udp_rx[i].len < bufsz ? udp_rx[i].len : bufsz;
+            memcpy(buf, udp_rx[i].data, (size_t)n);
+            udp_rx[i].used = 0;
+            return n;
+        }
+    }
+    return -1;
 }

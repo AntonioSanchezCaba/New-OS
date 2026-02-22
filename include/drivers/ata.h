@@ -78,6 +78,10 @@ int  ata_write(ata_drive_t* drive, uint64_t lba, uint16_t count, const void* buf
 void ata_identify(ata_drive_t* drive);
 ata_drive_t* ata_get_drive(int bus, int drive);
 
+/* Compatibility wrappers (used by fat32, blockcache) */
+int ata_read_sectors(ata_drive_t* drive, uint64_t lba, uint16_t count, void* buf);
+int ata_write_sectors(ata_drive_t* drive, uint64_t lba, uint16_t count, const void* buf);
+
 /* Number of detected drives */
 extern int ata_drive_count;
 extern ata_drive_t ata_drives[4];

@@ -117,7 +117,7 @@ void uefi_gop_apply(const gop_info_t* info)
     /* Map the physical framebuffer into our kernel virtual address space.
      * For now (identity-mapped kernel), physical == virtual for low memory.
      * Full UEFI memory map handling would remap via VMM. */
-    fb.addr   = (uint32_t*)(uintptr_t)info->fb_addr;
+    fb.phys_addr   = (uint32_t*)(uintptr_t)info->fb_addr;
     fb.width  = info->width;
     fb.height = info->height;
     fb.pitch  = info->pitch;

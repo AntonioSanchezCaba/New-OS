@@ -204,3 +204,25 @@ uint64_t pci_bar_address(pci_device_t* dev, int bar_idx)
     if (bar_idx < 0 || bar_idx >= 6) return 0;
     return (uint64_t)dev->bar[bar_idx];
 }
+
+/* =========================================================
+ * Class-based device search (used by USB, etc.)
+ * ========================================================= */
+
+pci_device_t* pci_find_class(uint8_t class, uint8_t subclass, uint8_t prog_if)
+{
+    for (int i = 0; i < pci_device_count; i++) {
+        if (pci_devices[i].class_code == class &&
+            pci_devices[i].subclass   == subclass &&
+            pci_devices[i].prog_if    == prog_if)
+            return &pci_devices[i];
+    }
+    return NULL;
+}
+
+/* Return raw BAR value for a given BAR index */
+uint32_t pci_read_bar(pci_device_t* dev, int bar_idx)
+{
+    if (!dev || bar_idx < 0 || bar_idx >= 6) return 0;
+    return dev->bar[bar_idx];
+}

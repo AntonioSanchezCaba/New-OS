@@ -102,12 +102,12 @@ static void launch_editor(void)      { wid_t w = app_texteditor_create();  if (w
 static void launch_monitor(void)     { wid_t w = app_sysmonitor_create();  if (w >= 0) launcher_track_window(w, "Monitor"); }
 
 static const app_def_t g_apps[] = {
-    { "Terminal",     ">_", rgb(0x14, 0x28, 0x14), launch_terminal },
-    { "Files",        "[]", rgb(0x14, 0x28, 0x50), launch_files    },
-    { "Text Editor",  "Ed", rgb(0x28, 0x14, 0x50), launch_editor   },
-    { "Sys Monitor",  "Mn", rgb(0x50, 0x14, 0x14), launch_monitor  },
-    { "Settings",     "St", rgb(0x28, 0x28, 0x28), NULL             },
-    { "Network",      "Ne", rgb(0x14, 0x50, 0x50), NULL             },
+    { "Terminal",     ">_", RGB(0x14, 0x28, 0x14), launch_terminal },
+    { "Files",        "[]", RGB(0x14, 0x28, 0x50), launch_files    },
+    { "Text Editor",  "Ed", RGB(0x28, 0x14, 0x50), launch_editor   },
+    { "Sys Monitor",  "Mn", RGB(0x50, 0x14, 0x14), launch_monitor  },
+    { "Settings",     "St", RGB(0x28, 0x28, 0x28), NULL             },
+    { "Network",      "Ne", RGB(0x14, 0x50, 0x50), NULL             },
 };
 #define N_APPS  ((int)(sizeof(g_apps) / sizeof(g_apps[0])))
 
@@ -153,9 +153,9 @@ static void _draw_taskbar(canvas_t* screen)
 
     /* Background */
     draw_gradient_v(screen, 0, ty, sw, TASKBAR_H,
-                    rgb(0x12, 0x1E, 0x32),
-                    rgb(0x08, 0x10, 0x1A));
-    draw_hline(screen, 0, ty, sw, rgb(0x30, 0x60, 0xA0));
+                    RGB(0x12, 0x1E, 0x32),
+                    RGB(0x08, 0x10, 0x1A));
+    draw_hline(screen, 0, ty, sw, RGB(0x30, 0x60, 0xA0));
 
     /* Start / launcher button */
     bool hovered = false; /* TODO: track hover */

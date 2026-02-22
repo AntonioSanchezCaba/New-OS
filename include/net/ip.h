@@ -68,4 +68,10 @@ void icmp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len);
 /* Last received ICMP echo reply sequence number (0 = none yet) */
 extern volatile uint16_t g_icmp_reply_seq;
 
+/* IP address configuration */
+void       ip_set_addr(ip4_addr_t addr);
+void       ip_set_gateway(ip4_addr_t gw);
+void       ip_set_netmask(ip4_addr_t mask);
+ip4_addr_t ip_get_addr(void);
+
 #endif /* NET_IP_H */

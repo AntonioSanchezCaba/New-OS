@@ -80,31 +80,31 @@ void anim_start(wid_t wid, anim_type_t type)
     a->frame    = 0;
 
     a->src_x = w->x; a->src_y = w->y;
-    a->src_w = w->width; a->src_h = w->height;
+    a->src_w = w->w; a->src_h = w->h;
     a->dst_x = w->x; a->dst_y = w->y;
-    a->dst_w = w->width; a->dst_h = w->height;
+    a->dst_w = w->w; a->dst_h = w->h;
 
     switch (type) {
     case ANIM_OPEN:
         a->duration = ANIM_DURATION_OPEN;
         /* Start half-sized at centre */
-        a->src_x = w->x + w->width / 4;
-        a->src_y = w->y + w->height / 4;
-        a->src_w = w->width  / 2;
-        a->src_h = w->height / 2;
+        a->src_x = w->x + w->w / 4;
+        a->src_y = w->y + w->h / 4;
+        a->src_w = w->w  / 2;
+        a->src_h = w->h / 2;
         break;
     case ANIM_CLOSE:
         a->duration = ANIM_DURATION_CLOSE;
-        a->dst_x = w->x + w->width / 4;
-        a->dst_y = w->y + w->height / 4;
-        a->dst_w = w->width  / 2;
-        a->dst_h = w->height / 2;
+        a->dst_x = w->x + w->w / 4;
+        a->dst_y = w->y + w->h / 4;
+        a->dst_w = w->w  / 2;
+        a->dst_h = w->h / 2;
         break;
     case ANIM_RESTORE:
         a->duration = ANIM_DURATION_RESTORE;
         /* Start from zero size at centre */
-        a->src_x = w->x + w->width / 2;
-        a->src_y = w->y + w->height / 2;
+        a->src_x = w->x + w->w / 2;
+        a->src_y = w->y + w->h / 2;
         a->src_w = 0; a->src_h = 0;
         break;
     default:
@@ -129,7 +129,7 @@ void anim_start_minimize(wid_t wid, int tx, int ty, int tw, int th)
     a->duration = ANIM_DURATION_MINIMIZE;
 
     a->src_x = w->x; a->src_y = w->y;
-    a->src_w = w->width; a->src_h = w->height;
+    a->src_w = w->w; a->src_h = w->h;
     a->dst_x = tx;   a->dst_y = ty;
     a->dst_w = tw;   a->dst_h = th;
     a->task_x = tx;  a->task_y = ty;
@@ -176,7 +176,7 @@ void anim_apply(wid_t wid, int* out_x, int* out_y,
     /* Default: no change */
     window_t* w = wm_get_window(wid);
     if (w) { *out_x = w->x; *out_y = w->y;
-             *out_w = w->width; *out_h = w->height; }
+             *out_w = w->w; *out_h = w->h; }
     *out_alpha = 255;
 
     for (int i = 0; i < ANIM_MAX; i++) {

@@ -39,6 +39,9 @@ typedef struct {
 
 extern framebuffer_t fb;
 
+/* Compile-time constant RGB macro (usable in static initializers) */
+#define RGB(r,g,b)  (0xFF000000u | (uint32_t)(r) << 16 | (uint32_t)(g) << 8 | (uint32_t)(b))
+
 /* 32-bit ARGB color constructors */
 static inline uint32_t rgb(uint8_t r, uint8_t g, uint8_t b) {
     return (0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
@@ -90,6 +93,7 @@ void    fb_blit_region(int dst_x, int dst_y,
 void    fb_blit_alpha(int dst_x, int dst_y,
                        const uint32_t* src, int src_w, int src_h, int src_pitch);
 bool    fb_ready(void);
+void    fb_init_backbuffer(void);
 uint64_t fb_frame_count(void);
 
 /* Alpha-blend two colors (src over dst, 8-bit alpha) */

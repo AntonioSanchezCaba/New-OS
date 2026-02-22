@@ -185,16 +185,19 @@ setup_page_tables:
 
     ;; ---- PML4 ----
     ;; PML4[0] -> PDPT (identity map, covers 0x0 - 0x7FFFFFFF)
-    mov eax, (boot_pdpt_low - KERNEL_VMA_OFFSET) | 3   ; Present + RW
+    mov eax, boot_pdpt_low - KERNEL_VMA_OFFSET
+    or  eax, 3                              ; Present + RW
     mov [boot_pml4 - KERNEL_VMA_OFFSET], eax
 
     ;; PML4[511] -> PDPT (higher half: 0xFFFFFFFF80000000+)
-    mov eax, (boot_pdpt_high - KERNEL_VMA_OFFSET) | 3
+    mov eax, boot_pdpt_high - KERNEL_VMA_OFFSET
+    or  eax, 3
     mov [boot_pml4 - KERNEL_VMA_OFFSET + 511*8], eax
 
     ;; ---- Lower PDPT ----
     ;; PDPT[0] -> PD (first 1GB)
-    mov eax, (boot_pd - KERNEL_VMA_OFFSET) | 3
+    mov eax, boot_pd - KERNEL_VMA_OFFSET
+    or  eax, 3
     mov [boot_pdpt_low - KERNEL_VMA_OFFSET], eax
 
     ;; ---- Higher PDPT ----
@@ -337,9 +340,10 @@ long_mode_entry:
     ;; Clear RBP for stack trace termination
     xor rbp, rbp
 
-    ;; Load multiboot2 info pointer into RDI (first argument)
-    ;; Convert physical address to virtual
-    mov rdi, [multiboot_info_ptr - KERNEL_VMA_OFFSET]
+    ;; Load multiboot2 info pointer into RDI (first argument).
+    ;; multiboot_info_ptr lives in .boot.bss (physical address, identity-mapped).
+    ;; Access via identity map and add higher-half offset.
+    mov rdi, [multiboot_info_ptr]
     add rdi, KERNEL_VMA_OFFSET
 
     ;; Jump to kernel main (must be done via absolute address in higher half)

@@ -309,7 +309,7 @@ static void fm_redraw(wid_t wid)
         int dy = c.height - FM_STATUS_H - 40;
         draw_rect(&c, fx, dy, fw, 40, th->error);
         char msg[128];
-        vsnprintf(msg, sizeof(msg),
+        snprintf(msg, sizeof(msg),
                   "Delete '%s'? Press Delete again to confirm, Esc to cancel.",
                   f->items[f->delete_idx]);
         draw_string(&c, fx + 8, dy + (40 - FONT_H) / 2, msg,
@@ -323,13 +323,13 @@ static void fm_redraw(wid_t wid)
 
     char status[128];
     if (f->selected >= 0 && f->selected < f->item_count) {
-        vsnprintf(status, sizeof(status),
+        snprintf(status, sizeof(status),
                   "%d items   |   Selected: %s%s",
                   f->item_count,
                   f->items[f->selected],
                   f->is_dir[f->selected] ? "/" : "");
     } else {
-        vsnprintf(status, sizeof(status), "%d items", f->item_count);
+        snprintf(status, sizeof(status), "%d items", f->item_count);
     }
     draw_string(&c, 8, st_y + (FM_STATUS_H - FONT_H) / 2,
                 status, th->text_secondary, rgba(0,0,0,0));

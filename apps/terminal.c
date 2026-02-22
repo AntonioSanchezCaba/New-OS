@@ -23,6 +23,7 @@
 #include <kernel.h>
 #include <process.h>
 #include <scheduler.h>
+#include <stdarg.h>
 
 #define TERM_W      680
 #define TERM_H      420

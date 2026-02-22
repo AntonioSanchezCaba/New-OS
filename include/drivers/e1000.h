@@ -15,6 +15,9 @@ typedef struct {
     uint32_t rx_errors;
 } e1000_stats_t;
 
+/* Global MAC address (populated by e1000_init) */
+extern mac_addr_t e1000_mac;
+
 /* e1000 driver API */
 int  e1000_init(void);        /* Returns 0 on success, -1 if no device found */
 int  e1000_send(const void* data, size_t len);

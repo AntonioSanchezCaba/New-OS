@@ -41,7 +41,7 @@ compositor_t g_compositor;
  * Internal helpers
  * ========================================================= */
 
-static surface_t* _find_surf(surf_id_t id)
+static comp_surface_t* _find_surf(surf_id_t id)
 {
     if (id == SURF_INVALID) return NULL;
     for (int i = 0; i < COMP_MAX_SURFACES; i++) {
@@ -52,7 +52,7 @@ static surface_t* _find_surf(surf_id_t id)
     return NULL;
 }
 
-static surface_t* _alloc_surf(void)
+static comp_surface_t* _alloc_surf(void)
 {
     for (int i = 0; i < COMP_MAX_SURFACES; i++) {
         if (!g_compositor.surfaces[i].valid)
@@ -62,7 +62,7 @@ static surface_t* _alloc_surf(void)
 }
 
 /* Draw a decorated titlebar into the surface's full buffer */
-static void _draw_titlebar(surface_t* s)
+static void _draw_titlebar(comp_surface_t* s)
 {
     if (!(s->flags & SURF_FLAG_DECORATED)) return;
 
@@ -149,7 +149,7 @@ surf_id_t compositor_create_surface(uint32_t owner_tid, port_id_t notify_port,
 {
     if (w <= 0 || h <= 0) return SURF_INVALID;
 
-    surface_t* s = _alloc_surf();
+    comp_surface_t* s = _alloc_surf();
     if (!s) {
         klog_warn("COMP: surface table full");
         return SURF_INVALID;
@@ -225,7 +225,7 @@ surf_id_t compositor_create_surface(uint32_t owner_tid, port_id_t notify_port,
 
 void compositor_destroy_surface(surf_id_t id)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
 
     if (s->buf_cap != CAP_INVALID_ID) cap_release(s->buf_cap);
@@ -253,7 +253,7 @@ void compositor_destroy_surface(surf_id_t id)
 
 void compositor_set_geometry(surf_id_t id, int x, int y, int w, int h)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
     s->x = x; s->y = y;
     /* Resize is more involved (realloc buffer) — just move for now */
@@ -264,7 +264,7 @@ void compositor_set_geometry(surf_id_t id, int x, int y, int w, int h)
 
 void compositor_set_visible(surf_id_t id, bool visible)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
     if (visible) {
         s->flags |=  SURF_FLAG_VISIBLE;
@@ -276,7 +276,7 @@ void compositor_set_visible(surf_id_t id, bool visible)
 
 void compositor_set_title(surf_id_t id, const char* title)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s || !title) return;
     strncpy(s->title, title, COMP_TITLE_LEN - 1);
     s->title[COMP_TITLE_LEN - 1] = '\0';
@@ -286,7 +286,7 @@ void compositor_set_title(surf_id_t id, const char* title)
 
 void compositor_raise(surf_id_t id)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
     /* Find max Z and set this surface above it */
     int max_z = 0;
@@ -301,7 +301,7 @@ void compositor_raise(surf_id_t id)
 void compositor_focus(surf_id_t id)
 {
     /* Unfocus old */
-    surface_t* old = _find_surf(g_compositor.focused_id);
+    comp_surface_t* old = _find_surf(g_compositor.focused_id);
     if (old) {
         old->flags &= ~SURF_FLAG_FOCUSED;
         _draw_titlebar(old);
@@ -310,7 +310,7 @@ void compositor_focus(surf_id_t id)
 
     g_compositor.focused_id = id;
 
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (s) {
         s->flags |= SURF_FLAG_FOCUSED;
         _draw_titlebar(s);
@@ -321,7 +321,7 @@ void compositor_focus(surf_id_t id)
 
 void compositor_commit(surf_id_t id)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
     s->damaged = true;
     s->dmg_x = 0; s->dmg_y = 0;
@@ -330,7 +330,7 @@ void compositor_commit(surf_id_t id)
 
 void compositor_damage(surf_id_t id, int x, int y, int w, int h)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) return;
     /* Expand damage rect to union */
     if (!s->damaged) {
@@ -350,7 +350,7 @@ void compositor_damage(surf_id_t id, int x, int y, int w, int h)
 
 canvas_t compositor_get_canvas(surf_id_t id)
 {
-    surface_t* s = _find_surf(id);
+    comp_surface_t* s = _find_surf(id);
     if (!s) {
         canvas_t empty = {NULL, 0, 0, 0};
         return empty;
@@ -391,7 +391,7 @@ void compositor_composite(void)
 
     /* Composite each visible surface back-to-front */
     for (int i = 0; i < n; i++) {
-        surface_t* s = &g_compositor.surfaces[order[i]];
+        comp_surface_t* s = &g_compositor.surfaces[order[i]];
         if (!s->valid)                      continue;
         if (!(s->flags & SURF_FLAG_VISIBLE)) continue;
         if (s->flags & SURF_FLAG_MINIMIZED) continue;
@@ -459,7 +459,7 @@ void compositor_handle_msg(const ipc_msg_t* msg)
         msg_disp_create_reply_t* rep = (msg_disp_create_reply_t*)reply.data;
         rep->surf_id = sid;
         rep->stride  = (sid != SURF_INVALID) ? req->w : 0;
-        surface_t* s = _find_surf(sid);
+        comp_surface_t* s = _find_surf(sid);
         rep->buf_cap = (s && sid != SURF_INVALID) ? s->buf_cap : CAP_INVALID_ID;
         reply.data_len = sizeof(msg_disp_create_reply_t);
         reply.type     = MSG_DISP_CREATE;
@@ -537,7 +537,7 @@ static void _handle_mouse(int mx, int my, uint8_t buttons, uint8_t prev_btns)
     /* Continue drag */
     if (pressed) {
         for (int i = 0; i < COMP_MAX_SURFACES; i++) {
-            surface_t* s = &g_compositor.surfaces[i];
+            comp_surface_t* s = &g_compositor.surfaces[i];
             if (!s->valid || !s->drag_active) continue;
             int nx = mx - s->drag_off_x;
             int ny = my - s->drag_off_y;
@@ -550,10 +550,10 @@ static void _handle_mouse(int mx, int my, uint8_t buttons, uint8_t prev_btns)
 
     /* Hit test front-to-back (highest Z first) */
     int best_z = -1;
-    surface_t* hit = NULL;
+    comp_surface_t* hit = NULL;
 
     for (int i = 0; i < COMP_MAX_SURFACES; i++) {
-        surface_t* s = &g_compositor.surfaces[i];
+        comp_surface_t* s = &g_compositor.surfaces[i];
         if (!s->valid || !(s->flags & SURF_FLAG_VISIBLE)) continue;
         if (s->flags & SURF_FLAG_MINIMIZED) continue;
 

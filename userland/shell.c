@@ -16,6 +16,7 @@
 #include <memory.h>
 #include <types.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define SHELL_MAX_LINE   256
 #define SHELL_MAX_ARGS   32

@@ -77,4 +77,8 @@ int  udp_send(ip4_addr_t dst, uint16_t src_port, uint16_t dst_port,
               const void* data, size_t len);
 void udp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len);
 
+/* Poll for an incoming UDP datagram on a local port.
+ * Returns bytes copied into buf, or -1 if nothing available. */
+int  udp_recv_poll(uint16_t local_port, void* buf, int bufsz);
+
 #endif /* NET_TCP_H */

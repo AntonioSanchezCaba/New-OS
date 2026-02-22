@@ -115,7 +115,7 @@ static void build_discover(dhcp_packet_t* pkt)
     pkt->magic  = 0x63538263UL; /* little-endian representation of magic */
 
     /* Our MAC */
-    uint8_t* mac = e1000_mac();
+    uint8_t* mac = e1000_mac.b;
     memcpy(pkt->chaddr, mac, 6);
 
     /* Options */
@@ -145,7 +145,7 @@ static void build_request(dhcp_packet_t* pkt,
     pkt->flags  = 0x0080;
     pkt->magic  = 0x63538263UL;
 
-    uint8_t* mac = e1000_mac();
+    uint8_t* mac = e1000_mac.b;
     memcpy(pkt->chaddr, mac, 6);
 
     int pos = 0;

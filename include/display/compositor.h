@@ -81,14 +81,14 @@ typedef struct {
     /* Drag state (managed by compositor) */
     bool        drag_active;
     int         drag_off_x, drag_off_y;
-} surface_t;
+} comp_surface_t;
 
 /* =========================================================
  * Compositor state (exposed for service routines)
  * ========================================================= */
 
 typedef struct {
-    surface_t   surfaces[COMP_MAX_SURFACES];
+    comp_surface_t   surfaces[COMP_MAX_SURFACES];
     uint32_t    surf_count;
     surf_id_t   focused_id;      /* Surface with keyboard focus */
     surf_id_t   next_id;

@@ -36,6 +36,7 @@
 #define OS_COPYRIGHT      "© " OS_YEAR " AetherOS Project"
 #define OS_LICENSE        "Open Source"
 #define OS_PROJECT        "AetherOS Project"
+#define OS_AUTHOR         "AetherOS Project"
 
 /* ── Service bus names (must match kernel/svcbus.h) ─────────────────────── */
 #define OS_SVC_DISPLAY    "aether.display"

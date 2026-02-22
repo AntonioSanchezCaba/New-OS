@@ -10,6 +10,7 @@
 #include <kernel.h>
 #include <types.h>
 #include <string.h>
+#include <errno.h>
 
 /*
  * elf_validate - sanity-check an ELF binary.

@@ -232,3 +232,21 @@ void fb_blit_alpha(int dst_x, int dst_y,
         }
     }
 }
+
+/*
+ * fb_init_backbuffer - re-allocate/re-initialize back buffer.
+ * Called by uefi_gop_apply() after framebuffer geometry changes.
+ */
+void fb_init_backbuffer(void)
+{
+    if (fb.back_buf) {
+        kfree(fb.back_buf);
+        fb.back_buf = NULL;
+    }
+    size_t sz = (size_t)fb.width * fb.height * sizeof(uint32_t);
+    fb.back_buf = (uint32_t*)kmalloc(sz);
+    if (!fb.back_buf) {
+        kpanic("framebuffer: fb_init_backbuffer OOM (%u bytes)", (uint32_t)sz);
+    }
+    memset(fb.back_buf, 0, sz);
+}

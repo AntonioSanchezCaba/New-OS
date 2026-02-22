@@ -1,3 +1,4 @@
+#include <errno.h>
 /*
  * kernel/tty.c - TTY / PTY subsystem
  *

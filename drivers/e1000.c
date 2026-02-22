@@ -114,7 +114,7 @@ typedef struct {
 
 static volatile uint8_t*  e1000_mmio = NULL;
 static bool               e1000_ready = false;
-static mac_addr_t         e1000_mac;
+mac_addr_t e1000_mac;
 
 /* Descriptor rings - physically contiguous aligned to 16 bytes */
 static e1000_rx_desc_t rx_descs[E1000_RX_DESC_COUNT] __attribute__((aligned(16)));
@@ -193,8 +193,9 @@ int e1000_init(void)
     /* Map 128KB of MMIO registers at BAR0 */
     uint64_t bar0_virt = KERNEL_VMA_BASE + bar0_phys;
     for (uint64_t off = 0; off < 0x20000; off += PAGE_SIZE) {
-        vmm_map_page((void*)(bar0_virt + off),
-                     (phys_addr_t)(bar0_phys + off),
+        vmm_map_page(kernel_pml4,
+                     bar0_virt + off,
+                     bar0_phys + off,
                      PTE_PRESENT | PTE_WRITABLE | PTE_CACHE_DISABLE);
     }
     e1000_mmio = (volatile uint8_t*)bar0_virt;
@@ -271,7 +272,7 @@ int e1000_init(void)
     /* Register IRQ handler */
     uint8_t irq = pci->irq_line;
     if (irq > 0 && irq < 16) {
-        irq_register(irq, e1000_irq_handler);
+        irq_register_handler(irq, (irq_handler_t) e1000_irq_handler);
         pic_clear_mask(irq);
         kinfo("e1000: registered IRQ %u", irq);
     }

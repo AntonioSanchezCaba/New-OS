@@ -1,39 +1,28 @@
 /*
  * linker.ld - Kernel linker script for x86_64
  *
- * The kernel is physically loaded at 0x100000 (1MB) by GRUB, but the
- * code and data are linked at KERNEL_VMA_BASE + 0x100000 (higher half).
+ * Boot sections (multiboot2, boot.text, boot.data, boot.bss) are placed
+ * at their physical load address (0x100000) so they can run before paging.
  *
- * The boot code (.multiboot2, .boot.text, .boot.data, .boot.bss) is
- * placed at its physical load address (0x100000) so it can run before
- * paging is enabled.
+ * Higher-half kernel sections start immediately after the boot sections
+ * in physical memory, but are linked at KERNEL_VMA_BASE + physical_offset.
  *
- * All other sections are linked at the higher-half virtual address:
- *   Virtual:  0xFFFFFFFF80100000
- *   Physical: 0x100000
- *
- * AT(expr) in section definitions provides the physical Load Memory Address (LMA)
- * while the section address provides the Virtual Memory Address (VMA).
+ * VMA layout:  0xFFFFFFFF80100000 + (phys_offset - 0x100000)
+ * LMA layout:  physical address (starting at boot_end, page-aligned)
  */
 
 OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 
-/* Kernel virtual base address */
-KERNEL_VMA_BASE = 0xFFFFFFFF80000000;
-
-/* Physical load base */
+KERNEL_VMA_BASE  = 0xFFFFFFFF80000000;
 KERNEL_PHYS_BASE = 0x100000;
 
 SECTIONS
 {
-    /*
-     * ============================================================
-     * Boot sections (VMA = LMA = physical address)
-     * These run before paging is enabled.
-     * ============================================================
-     */
+    /* ========================================================
+     * Boot sections — VMA = LMA = physical (no paging yet)
+     * ======================================================== */
     . = KERNEL_PHYS_BASE;
 
     .multiboot2 : {
@@ -52,19 +41,20 @@ SECTIONS
         KEEP(*(.boot.bss))
     }
 
-    /* Record the physical end of boot sections */
-    boot_end = .;
+    /* Physical end of boot-time code/data */
+    boot_end_phys = ALIGN(., 0x1000);
+
+    /* ========================================================
+     * Higher-half kernel sections
+     * VMA = KERNEL_VMA_BASE + phys_offset
+     * LMA = phys_offset  (AT() provides this)
+     * ======================================================== */
 
     /*
-     * ============================================================
-     * Higher-half kernel sections
-     * VMA = KERNEL_VMA_BASE + physical_offset
-     * LMA (AT) = physical address
-     * ============================================================
+     * Advance location counter to the higher-half VMA corresponding
+     * to boot_end_phys in physical memory.
      */
-
-    /* Jump to higher-half VMA. The AT() provides the physical LMA. */
-    . = KERNEL_VMA_BASE + KERNEL_PHYS_BASE;
+    . = KERNEL_VMA_BASE + boot_end_phys;
 
     .text ALIGN(0x1000) : AT(ADDR(.text) - KERNEL_VMA_BASE)
     {
@@ -98,14 +88,10 @@ SECTIONS
     /* End of kernel image */
     _kernel_end = .;
 
-    /* Physical end addresses (for PMM to mark kernel as used) */
+    /* Physical addresses for PMM (mark kernel pages as used) */
     _kernel_phys_start = KERNEL_PHYS_BASE;
     _kernel_phys_end   = _kernel_end - KERNEL_VMA_BASE;
 
-    /*
-     * Discard unneeded sections (debug, notes, etc.)
-     * Comment these out to keep debug info for GDB.
-     */
     /DISCARD/ : {
         *(.comment)
         *(.note*)

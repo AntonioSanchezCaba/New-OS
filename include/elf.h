@@ -7,6 +7,7 @@
 #define ELF_H
 
 #include <types.h>
+#include <process.h>
 
 /* ELF magic number */
 #define ELF_MAGIC   0x464C457F  /* "\x7fELF" in little-endian */

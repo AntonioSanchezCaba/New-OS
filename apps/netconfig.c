@@ -156,7 +156,7 @@ static void nc_draw(nc_t* nc, canvas_t* c)
            up ? th->ok : th->error);
 
     fmt_mac(buf, sizeof(buf), &net_iface.mac);
-    nc_row(c, &y, "MAC Address:", buf, th->win_text);
+    nc_row(c, &y, "MAC Address:", buf, th->text_primary);
 
     /* net_iface.ip is in network byte order — pass directly to fmt_ip */
     if (net_iface.ip == 0) strncpy(buf, "(not assigned)", sizeof(buf)-1);
@@ -165,16 +165,16 @@ static void nc_draw(nc_t* nc, canvas_t* c)
 
     if (net_iface.netmask == 0) strncpy(buf, "(none)", sizeof(buf)-1);
     else fmt_ip(buf, sizeof(buf), htonl(net_iface.netmask));
-    nc_row(c, &y, "Subnet Mask:", buf, th->win_text);
+    nc_row(c, &y, "Subnet Mask:", buf, th->text_primary);
 
     if (net_iface.gateway == 0) strncpy(buf, "(none)", sizeof(buf)-1);
     else fmt_ip(buf, sizeof(buf), htonl(net_iface.gateway));
-    nc_row(c, &y, "Default Gateway:", buf, th->win_text);
+    nc_row(c, &y, "Default Gateway:", buf, th->text_primary);
 
     uint32_t dns_srv = dns_get_server();
     if (dns_srv == 0) strncpy(buf, "(none)", sizeof(buf)-1);
     else fmt_ip(buf, sizeof(buf), htonl(dns_srv));
-    nc_row(c, &y, "DNS Server:", buf, th->win_text);
+    nc_row(c, &y, "DNS Server:", buf, th->text_primary);
 
     y += 4;
 
@@ -193,7 +193,7 @@ static void nc_draw(nc_t* nc, canvas_t* c)
         strncat(buf, "h ", sizeof(buf)-strlen(buf)-1);
         strncat(buf, m2, sizeof(buf)-strlen(buf)-1);
         strncat(buf, "m", sizeof(buf)-strlen(buf)-1);
-        nc_row(c, &y, "Lease Time:", buf, th->win_text);
+        nc_row(c, &y, "Lease Time:", buf, th->text_primary);
     } else {
         nc_row(c, &y, "Status:", "No DHCP lease", th->warn);
     }
@@ -216,7 +216,7 @@ static void nc_draw(nc_t* nc, canvas_t* c)
                       nc->ping_input_focused ? th->accent : th->panel_border);
     if (nc->ping_host[0])
         draw_string(c, NC_INDENT+4, inp_y+(NC_ROW_H-6-FONT_H)/2,
-                    nc->ping_host, th->win_text, rgba(0,0,0,0));
+                    nc->ping_host, th->text_primary, rgba(0,0,0,0));
     else
         draw_string(c, NC_INDENT+4, inp_y+(NC_ROW_H-6-FONT_H)/2,
                     "host or IP  (e.g. 8.8.8.8)",
@@ -225,7 +225,7 @@ static void nc_draw(nc_t* nc, canvas_t* c)
     /* Cursor blink */
     if (nc->ping_input_focused && ((timer_get_ticks()/30)&1)) {
         int cx = NC_INDENT+4 + nc->ping_len*FONT_W;
-        draw_vline(c, cx, inp_y+2, NC_ROW_H-10, th->win_text);
+        draw_vline(c, cx, inp_y+2, NC_ROW_H-10, th->text_primary);
     }
 
     /* Ping button */
@@ -239,7 +239,7 @@ static void nc_draw(nc_t* nc, canvas_t* c)
 
     /* Ping result */
     const char* res_txt = NULL;
-    uint32_t    res_col = th->win_text;
+    uint32_t    res_col = th->text_primary;
     if (nc->ping_state == PING_OK) {
         buf[0] = '\0';
         strncat(buf, nc->ping_host, 40);
@@ -267,10 +267,10 @@ static void nc_draw(nc_t* nc, canvas_t* c)
     fmt_uint(n2,sizeof(n2),st.rx_packets); strncat(n2," pkts",sizeof(n2)-strlen(n2)-1);
     fmt_uint(n3,sizeof(n3),st.tx_errors);  strncat(n3," err", sizeof(n3)-strlen(n3)-1);
     fmt_uint(n4,sizeof(n4),st.rx_errors);  strncat(n4," err", sizeof(n4)-strlen(n4)-1);
-    nc_row(c, &y, "Packets sent:",     n1, th->win_text);
-    nc_row(c, &y, "Packets received:", n2, th->win_text);
-    nc_row(c, &y, "TX errors:",        n3, st.tx_errors?th->error:th->win_text);
-    nc_row(c, &y, "RX errors:",        n4, st.rx_errors?th->error:th->win_text);
+    nc_row(c, &y, "Packets sent:",     n1, th->text_primary);
+    nc_row(c, &y, "Packets received:", n2, th->text_primary);
+    nc_row(c, &y, "TX errors:",        n3, st.tx_errors?th->error:th->text_primary);
+    nc_row(c, &y, "RX errors:",        n4, st.rx_errors?th->error:th->text_primary);
 }
 
 /* =========================================================
