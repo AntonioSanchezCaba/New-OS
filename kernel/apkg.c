@@ -246,7 +246,7 @@ void apkg_save(void)
 
     vfs_node_t* node = vfs_open(APKG_DB_VFS_PATH, VFS_O_WRITE | VFS_O_CREATE);
     if (node) {
-        vfs_write(node, (const uint8_t*)buf, (size_t)pos, 0);
+        vfs_write(node, 0, (size_t)pos, buf);
         vfs_close(node);
     }
 }
@@ -257,7 +257,7 @@ void apkg_load(void)
     if (!node) return;
 
     char buf[4096];
-    ssize_t n = vfs_read(node, (uint8_t*)buf, sizeof(buf) - 1, 0);
+    ssize_t n = vfs_read(node, 0, sizeof(buf) - 1, buf);
     vfs_close(node);
     if (n <= 0) return;
     buf[n] = '\0';

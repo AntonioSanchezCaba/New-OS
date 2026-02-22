@@ -35,6 +35,7 @@
 #include <drivers/e1000.h>
 #include <fs/vfs.h>
 #include <net/net.h>
+#include <net/ip.h>
 #include <gui/gui.h>
 
 /* === Aether OS architectural layer === */

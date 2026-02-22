@@ -152,7 +152,7 @@ static int iv_load(iv_t* iv, const char* path)
     if (!sz || sz > 8*1024*1024) { vfs_close(node); return -1; }
     uint8_t* buf = (uint8_t*)kmalloc(sz);
     if (!buf) { vfs_close(node); return -1; }
-    ssize_t n = vfs_read(node, buf, sz, 0);
+    ssize_t n = vfs_read(node, 0, sz, buf);
     vfs_close(node);
     if (n != (ssize_t)sz) { kfree(buf); return -1; }
 

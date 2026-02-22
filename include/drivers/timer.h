@@ -36,4 +36,7 @@ void     timer_sleep_ms(uint64_t ms);
 void     timer_irq_handler(void* regs);
 void     timer_register_callback(void (*cb)(uint64_t ticks));
 
+/* Alias used throughout drivers/services/networking */
+static inline uint64_t timer_get_ticks(void) { return timer_ticks(); }
+
 #endif /* DRIVERS_TIMER_H */

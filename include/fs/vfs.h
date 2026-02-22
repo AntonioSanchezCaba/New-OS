@@ -127,6 +127,17 @@ typedef struct file {
 #define VFS_O_TRUNC    O_TRUNC
 #define VFS_O_APPEND   O_APPEND
 
+/* Short-form aliases used in apps/services */
+#define VFS_O_READ     VFS_O_RDONLY
+#define VFS_O_WRITE    VFS_O_WRONLY
+#define VFS_O_CREATE   VFS_O_CREAT
+
+/* Convenience: return size of a VFS node (0 if NULL) */
+static inline uint64_t vfs_size(const vfs_node_t* node)
+{
+    return node ? node->size : 0;
+}
+
 /* VFS API */
 void       vfs_init(void);
 vfs_node_t* vfs_root(void);

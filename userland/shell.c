@@ -87,15 +87,15 @@ static void cmd_ls(int argc, char** argv)
     }
 
     uint32_t idx = 0;
-    vfs_dirent_t* entry;
-    while ((entry = vfs_readdir(dir, idx++)) != NULL) {
-        if (entry->type & VFS_DIRECTORY) {
+    vfs_dirent_t ent;
+    while (vfs_readdir(dir, idx++, &ent) == 0) {
+        if (ent.type & VFS_DIRECTORY) {
             vga_set_color(vga_make_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
         } else {
             vga_set_color(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
         }
-        shell_printf("  %s%s\n", entry->name,
-                     (entry->type & VFS_DIRECTORY) ? "/" : "");
+        shell_printf("  %s%s\n", ent.name,
+                     (ent.type & VFS_DIRECTORY) ? "/" : "");
         vga_set_color(vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
     }
 }
