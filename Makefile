@@ -178,7 +178,22 @@ C_SRCS := \
     kernel/tty.c                \
     kernel/pkg.c                \
     net/socket.c                \
-    services/bootanim.c
+    services/bootanim.c         \
+    drivers/cursor.c            \
+    drivers/uefi_gop.c          \
+    drivers/usb.c               \
+    gui/wallpaper.c             \
+    gui/clipboard.c             \
+    gui/animation.c             \
+    gui/workspace.c             \
+    fs/blockcache.c             \
+    kernel/diskman.c            \
+    kernel/users.c              \
+    kernel/apkg.c               \
+    net/dhcp.c                  \
+    net/dns.c                   \
+    apps/imgviewer.c            \
+    apps/netconfig.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \

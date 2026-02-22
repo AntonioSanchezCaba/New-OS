@@ -42,10 +42,20 @@
 #include <kernel/ipc.h>
 #include <kernel/svcbus.h>
 #include <kernel/secmon.h>
+#include <kernel/diskman.h>
+#include <kernel/users.h>
+#include <kernel/apkg.h>
 #include <mm/buddy.h>
 #include <display/compositor.h>
 #include <input/input_svc.h>
 #include <services/launcher.h>
+/* New subsystem drivers/GUI/net */
+#include <drivers/uefi_gop.h>
+#include <drivers/cursor.h>
+#include <drivers/usb.h>
+#include <gui/wallpaper.h>
+#include <gui/animation.h>
+#include <net/dhcp.h>
 
 /* Kernel state */
 static kernel_state_t kernel_state = KERNEL_STATE_BOOT;
@@ -118,10 +128,18 @@ void kernel_main(struct multiboot2_info* mb2_info)
         kinfo("Framebuffer: %ux%u %ubpp at 0x%llx",
               fb_tag->width, fb_tag->height, fb_tag->bpp,
               (unsigned long long)fb_tag->addr);
+        /* Try UEFI GOP via Multiboot2 first */
+        uefi_gop_init(mb2_info);
         fb_init(fb_tag);
         if (fb_ready()) {
             kinfo("Initializing PS/2 mouse...");
             mouse_init();
+            kinfo("Initializing software cursor...");
+            cursor_init();
+            kinfo("Initializing wallpaper engine...");
+            wallpaper_init();
+            kinfo("Initializing window animations...");
+            anim_init();
             kinfo("Initializing GUI subsystem...");
             gui_init();
         } else {
@@ -163,7 +181,11 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("  Buddy memory : %llu KB free",
           (unsigned long long)(buddy_free_bytes() / 1024));
 
-    /* === Phase 4c: PCI bus and network === */
+    /* === Phase 4c: USB HID === */
+    kinfo("Initializing USB (UHCI skeleton)...");
+    usb_init();
+
+    /* === Phase 4d: PCI bus and network === */
     kinfo("Scanning PCI bus...");
     pci_init();
 
@@ -172,13 +194,21 @@ void kernel_main(struct multiboot2_info* mb2_info)
         kinfo("Initializing network stack...");
         net_init();
         arp_announce();
+        kinfo("Starting DHCP discovery...");
+        if (dhcp_discover() == 0)
+            kinfo("DHCP: lease acquired");
+        else
+            klog_warn("DHCP: no lease (static IP or no DHCP server)");
     } else {
         kinfo("No e1000 NIC found, networking disabled");
     }
 
-    /* === Phase 5: Filesystem === */
+    /* === Phase 5: Filesystem + disk manager === */
     kinfo("Initializing VFS...");
     vfs_init();
+
+    kinfo("Scanning disks and mounting partitions...");
+    diskman_init();
 
     /* === Phase 6: Process subsystem === */
     kinfo("Initializing process manager...");
@@ -186,6 +216,13 @@ void kernel_main(struct multiboot2_info* mb2_info)
 
     kinfo("Initializing scheduler...");
     scheduler_init();
+
+    /* === Phase 6b: User accounts and package manager === */
+    kinfo("Initializing user account system...");
+    users_init();
+
+    kinfo("Initializing package manager (apkg)...");
+    apkg_init();
 
     /* === Phase 7: Syscall interface === */
     kinfo("Initializing system call interface...");

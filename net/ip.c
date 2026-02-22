@@ -8,6 +8,9 @@
 #include <string.h>
 #include <memory.h>
 
+/* Sequence number of last received ICMP echo reply (updated by icmp_receive) */
+volatile uint16_t g_icmp_reply_seq = 0;
+
 /* =========================================================
  * ARP cache
  * ========================================================= */
@@ -317,5 +320,8 @@ void icmp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len)
         ip4_send(ip_hdr->src, PROTO_ICMP, rep->data, len);
         net_free_buf(rep);
     }
-    /* ICMP_ECHO_REPLY: could signal a waiting ping */
+    if (icmp->type == ICMP_ECHO_REPLY) {
+        /* Record last-received reply sequence so netconfig/ping can detect it */
+        g_icmp_reply_seq = ntohs(icmp->seq);
+    }
 }

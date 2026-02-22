@@ -7,11 +7,20 @@
 #include <types.h>
 #include <net/net.h>
 
+/* Driver statistics */
+typedef struct {
+    uint32_t tx_packets;
+    uint32_t rx_packets;
+    uint32_t tx_errors;
+    uint32_t rx_errors;
+} e1000_stats_t;
+
 /* e1000 driver API */
 int  e1000_init(void);        /* Returns 0 on success, -1 if no device found */
 int  e1000_send(const void* data, size_t len);
 void e1000_receive_poll(void);
 void e1000_get_mac(mac_addr_t* out);
+void e1000_get_stats(e1000_stats_t* out);
 
 /* Called from IRQ handler */
 void e1000_irq_handler(void* regs);

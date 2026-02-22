@@ -41,10 +41,17 @@ void gui_launch_settings(void);
 void gui_launch_calculator(void);
 void gui_launch_clock(void);
 void gui_launch_stress_test(void);
+void gui_launch_imgviewer(void);
+void gui_launch_netconfig(void);
 
 /* Periodic ticks from desktop loop */
 void clock_tick(void);
 void stress_tick(void);
+void imgviewer_tick(void);
+void netconfig_tick(void);
+
+/* Open image viewer with a specific file */
+wid_t app_imgviewer_open(const char* path);
 
 /* Taskbar */
 void taskbar_add(wid_t wid, const char* label);

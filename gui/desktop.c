@@ -17,9 +17,13 @@
 #include <gui/event.h>
 #include <gui/theme.h>
 #include <gui/notify.h>
+#include <gui/wallpaper.h>
+#include <gui/animation.h>
+#include <gui/workspace.h>
 #include <services/splash.h>
 #include <services/login.h>
 #include <drivers/framebuffer.h>
+#include <drivers/cursor.h>
 #include <drivers/mouse.h>
 #include <drivers/timer.h>
 #include <memory.h>
@@ -80,19 +84,10 @@ static void taskbar_remove_closed(void)
 /* ---- Desktop background ---- */
 static void draw_desktop_bg(void)
 {
-    const theme_t* th = theme_current();
-    draw_gradient_v(&g_screen, 0, 0,
-                    g_screen.width, g_screen.height - TASKBAR_H,
-                    th->desktop_bg, th->desktop_bg2);
+    /* Use the wallpaper engine (falls back to gradient if no image loaded) */
+    wallpaper_draw(&g_screen);
 
-    /* Subtle grid */
-    uint32_t grid = th->desktop_grid;
-    for (int x = 0; x < g_screen.width; x += 48)
-        draw_vline(&g_screen, x, 0, g_screen.height - TASKBAR_H, grid);
-    for (int y = 0; y < g_screen.height - TASKBAR_H; y += 48)
-        draw_hline(&g_screen, 0, y, g_screen.width, grid);
-
-    /* OS watermark bottom-right */
+    /* OS watermark bottom-right, semi-transparent */
     const char* wm_str = OS_BANNER_SHORT;
     int wlen = (int)strlen(wm_str) * FONT_W;
     draw_string(&g_screen,
@@ -120,21 +115,9 @@ void taskbar_draw(canvas_t* screen)
     draw_string_centered(screen, 4, wy + 4, START_BTN_W, TASKBAR_BTN_H,
                          OS_SHORT_NAME, th->btn_text, rgba(0,0,0,0));
 
-    /* === Virtual workspace indicator === */
+    /* === Virtual workspace indicator (real workspace manager) === */
     int wx = 4 + START_BTN_W + 6;
-    for (int i = 0; i < 4; i++) {
-        bool active = (i == g_workspace);
-        uint32_t wbg = active ? th->accent2 : rgba(0xFF,0xFF,0xFF, 0x18);
-        draw_rect_rounded(screen, wx + i * 21, wy + 10, 18, TASKBAR_BTN_H - 10,
-                          2, wbg);
-        if (active) {
-            draw_rect_outline(screen, wx + i * 21, wy + 10, 18, TASKBAR_BTN_H - 10,
-                              1, th->accent);
-        }
-        char ws[2] = { '0' + (char)i, '\0' };
-        draw_string_centered(screen, wx + i * 21, wy + 10, 18, TASKBAR_BTN_H - 10,
-                             ws, th->taskbar_text, rgba(0,0,0,0));
-    }
+    workspace_draw_indicator(screen, wx, wy + 4, WORKSPACE_W, TASKBAR_BTN_H);
 
     /* === App buttons === */
     int bx = wx + WORKSPACE_W + 4;
@@ -213,21 +196,25 @@ static void _launch_settings(void)    { gui_launch_settings();    startmenu_open
 static void _launch_calculator(void)  { gui_launch_calculator();  startmenu_open = false; }
 static void _launch_clock(void)       { gui_launch_clock();       startmenu_open = false; }
 static void _launch_stress(void)      { gui_launch_stress_test(); startmenu_open = false; }
+static void _launch_imgviewer(void)   { gui_launch_imgviewer();   startmenu_open = false; }
+static void _launch_netconfig(void)   { gui_launch_netconfig();   startmenu_open = false; }
 static void _do_shutdown(void)        { cpu_cli(); cpu_halt(); }
 
 static const menu_item_t g_menu_items[] = {
     { "Terminal",       "  >_ ", _launch_terminal    },
     { "File Manager",   "  [] ", _launch_files       },
     { "Text Editor",    "  == ", _launch_editor      },
+    { "Image Viewer",   "  [] ", _launch_imgviewer   },
     { "System Monitor", "  ## ", _launch_monitor     },
     { "Calculator",     "  +- ", _launch_calculator  },
     { "Clock",          "  O  ", _launch_clock       },
+    { "Network",        "  ~~ ", _launch_netconfig   },
     { "Settings",       "  @@ ", _launch_settings    },
-    { "Stress Test",    "  ~~ ", _launch_stress      },
+    { "Stress Test",    "  .. ", _launch_stress      },
     { NULL, NULL, NULL },  /* Separator */
     { "Shutdown",       "  X  ", _do_shutdown        },
 };
-#define MENU_ITEM_COUNT 10
+#define MENU_ITEM_COUNT 12
 
 static void draw_start_menu(canvas_t* screen)
 {
@@ -326,12 +313,14 @@ void taskbar_handle_mouse(int mx, int my, bool clicked)
 
     /* Workspace switcher */
     int wx = 4 + START_BTN_W + 6;
-    for (int i = 0; i < 4; i++) {
-        int wwx = wx + i * 21;
-        if (mx >= wwx && mx < wwx + 18) {
-            g_workspace = i;
-            return;
+    if (mx >= wx && mx < wx + WORKSPACE_W) {
+        /* Divide the WORKSPACE_W region into 4 equal slots */
+        int slot = (mx - wx) * 4 / WORKSPACE_W;
+        if (slot >= 0 && slot < 4) {
+            workspace_switch(slot);
+            g_workspace = workspace_current();
         }
+        return;
     }
 
     /* App buttons */
@@ -363,11 +352,14 @@ void desktop_tick(void)
     taskbar_draw(&g_screen);
     draw_start_menu(&g_screen);
     notify_tick(&g_screen);
+    /* Advance window animations */
+    anim_tick();
 }
 
 void desktop_init(void)
 {
     notify_init();
+    workspace_init();
 }
 
 /* ---- GUI subsystem ---- */
@@ -432,6 +424,8 @@ void gui_run(void)
         /* Per-app periodic ticks */
         clock_tick();
         stress_tick();
+        imgviewer_tick();
+        netconfig_tick();
 
         /* Desktop background + taskbar + notifications */
         desktop_tick();
@@ -455,8 +449,9 @@ void gui_run(void)
         /* Composite windows */
         wm_composite(&g_screen);
 
-        /* Mouse cursor */
-        mouse_draw_cursor(fb.back_buf, (int)fb.width, (int)fb.height);
+        /* Software cursor: erase old position, composite new position */
+        cursor_erase();
+        cursor_render();
 
         /* Flip to display */
         fb_flip();
@@ -471,37 +466,18 @@ extern wid_t app_filemanager_create(void);
 extern wid_t app_texteditor_create(void);
 extern wid_t app_sysmonitor_create(void);
 extern wid_t app_settings_create(void);
+extern wid_t app_imgviewer_create(void);
+extern wid_t app_netconfig_create(void);
 
-/* New apps — these manage their own static state */
-/* gui_launch_calculator, gui_launch_clock, gui_launch_stress_test
- * are defined in their respective .c files and declared in gui.h */
+#define LAUNCH(create_fn, label) do { \
+    wid_t _w = (create_fn)();         \
+    if (_w >= 0) { taskbar_add(_w, (label)); workspace_add_window(_w); } \
+} while(0)
 
-void gui_launch_terminal(void)
-{
-    wid_t wid = app_terminal_create();
-    if (wid >= 0) taskbar_add(wid, "Terminal");
-}
-
-void gui_launch_filemanager(void)
-{
-    wid_t wid = app_filemanager_create();
-    if (wid >= 0) taskbar_add(wid, "Files");
-}
-
-void gui_launch_texteditor(void)
-{
-    wid_t wid = app_texteditor_create();
-    if (wid >= 0) taskbar_add(wid, "Editor");
-}
-
-void gui_launch_sysmonitor(void)
-{
-    wid_t wid = app_sysmonitor_create();
-    if (wid >= 0) taskbar_add(wid, "Monitor");
-}
-
-void gui_launch_settings(void)
-{
-    wid_t wid = app_settings_create();
-    if (wid >= 0) taskbar_add(wid, "Settings");
-}
+void gui_launch_terminal(void)    { LAUNCH(app_terminal_create,    "Terminal"); }
+void gui_launch_filemanager(void) { LAUNCH(app_filemanager_create, "Files");    }
+void gui_launch_texteditor(void)  { LAUNCH(app_texteditor_create,  "Editor");   }
+void gui_launch_sysmonitor(void)  { LAUNCH(app_sysmonitor_create,  "Monitor");  }
+void gui_launch_settings(void)    { LAUNCH(app_settings_create,    "Settings"); }
+void gui_launch_imgviewer(void)   { LAUNCH(app_imgviewer_create,   "Images");   }
+void gui_launch_netconfig(void)   { LAUNCH(app_netconfig_create,   "Network");  }

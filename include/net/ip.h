@@ -65,4 +65,7 @@ void arp_announce(void);
 int  icmp_ping(ip4_addr_t target, uint16_t seq);
 void icmp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len);
 
+/* Last received ICMP echo reply sequence number (0 = none yet) */
+extern volatile uint16_t g_icmp_reply_seq;
+
 #endif /* NET_IP_H */

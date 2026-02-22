@@ -1,0 +1,142 @@
+/*
+ * kernel/diskman.c — Boot-time disk manager
+ *
+ * For each ATA drive found: reads MBR, parses partition table,
+ * identifies filesystem type, mounts into VFS.
+ *
+ * MBR partition type codes:
+ *   0x0B / 0x0C = FAT32
+ *   0x83        = Linux (ext2/3/4)
+ *   0x05 / 0x0F = Extended (ignored for now)
+ */
+#include <kernel/diskman.h>
+#include <fs/blockcache.h>
+#include <fs/fat32.h>
+#include <fs/vfs.h>
+#include <drivers/ata.h>
+#include <memory.h>
+#include <string.h>
+#include <kernel.h>
+#include <types.h>
+
+#pragma pack(push, 1)
+typedef struct {
+    uint8_t  status;
+    uint8_t  chs_first[3];
+    uint8_t  type;
+    uint8_t  chs_last[3];
+    uint32_t lba_start;
+    uint32_t lba_size;
+} mbr_part_t;
+
+typedef struct {
+    uint8_t   boot_code[446];
+    mbr_part_t parts[4];
+    uint16_t  signature;       /* 0xAA55 */
+} mbr_t;
+#pragma pack(pop)
+
+static disk_partition_t g_parts[DISKMAN_MAX_PARTS];
+static int              g_count = 0;
+
+/* =========================================================
+ * Mount point name builder
+ * ========================================================= */
+static void build_mount(char* out, int drive, int part)
+{
+    /* /mnt/hd0p1 ... /mnt/hd3p4 */
+    out[0] = '/'; out[1] = 'm'; out[2] = 'n'; out[3] = 't'; out[4] = '/';
+    out[5] = 'h'; out[6] = 'd'; out[7] = (char)('0' + drive);
+    out[8] = 'p'; out[9] = (char)('1' + part); out[10] = '\0';
+}
+
+/* =========================================================
+ * Try to mount a partition
+ * ========================================================= */
+static bool try_mount_fat32(int drive_idx, uint64_t lba_start,
+                             const char* mount_point)
+{
+    /* Ensure /mnt directory exists */
+    vfs_mkdir("/mnt");
+
+    int rc = fat32_mount(drive_idx, lba_start, mount_point);
+    if (rc == 0) {
+        kinfo("DISKMAN: FAT32 mounted %s", mount_point);
+        return true;
+    }
+    return false;
+}
+
+/* =========================================================
+ * Scan one drive
+ * ========================================================= */
+static void scan_drive(int drive_idx)
+{
+    extern ata_drive_t ata_drives[];
+    if (!ata_drives[drive_idx].present) return;
+
+    kinfo("DISKMAN: scanning drive %d (%s)",
+          drive_idx, ata_drives[drive_idx].model);
+
+    uint8_t* sector = bcache_get(drive_idx, 0);
+    if (!sector) { klog_warn("DISKMAN: cannot read MBR on drive %d", drive_idx); return; }
+
+    const mbr_t* mbr = (const mbr_t*)sector;
+    if (mbr->signature != 0xAA55) {
+        klog_warn("DISKMAN: drive %d has no valid MBR (sig=%04X)",
+                  drive_idx, mbr->signature);
+        return;
+    }
+
+    for (int pi = 0; pi < 4 && g_count < DISKMAN_MAX_PARTS; pi++) {
+        const mbr_part_t* p = &mbr->parts[pi];
+        if (p->type == 0 || p->lba_size == 0) continue;
+
+        disk_partition_t* dp = &g_parts[g_count++];
+        dp->drive_idx = drive_idx;
+        dp->part_idx  = pi;
+        dp->lba_start = p->lba_start;
+        dp->lba_size  = p->lba_size;
+        dp->type      = p->type;
+        dp->mounted   = false;
+        build_mount(dp->mount, drive_idx, pi);
+
+        kinfo("DISKMAN: drive %d part %d type=0x%02X lba=%u size=%u",
+              drive_idx, pi, p->type, p->lba_start, p->lba_size);
+
+        /* Try to mount */
+        if (p->type == 0x0B || p->type == 0x0C) {
+            dp->mounted = try_mount_fat32(drive_idx, p->lba_start, dp->mount);
+        } else if (p->type == 0x83) {
+            /* ext2 mount — attempt via generic VFS */
+            kinfo("DISKMAN: ext2 partition found at %s (not yet auto-mounted)",
+                  dp->mount);
+        }
+    }
+}
+
+/* =========================================================
+ * Public API
+ * ========================================================= */
+void diskman_init(void)
+{
+    g_count = 0;
+    kinfo("DISKMAN: scanning ATA drives...");
+    for (int d = 0; d < DISKMAN_MAX_DRIVES; d++)
+        scan_drive(d);
+    kinfo("DISKMAN: found %d partitions", g_count);
+}
+
+int diskman_count(void) { return g_count; }
+
+const disk_partition_t* diskman_get(int idx)
+{
+    if (idx < 0 || idx >= g_count) return NULL;
+    return &g_parts[idx];
+}
+
+void diskman_shutdown(void)
+{
+    bcache_flush_all();
+    kinfo("DISKMAN: all caches flushed");
+}

@@ -127,6 +127,12 @@ static uint8_t tx_bufs[E1000_TX_DESC_COUNT][E1000_BUF_SIZE] __attribute__((align
 static uint32_t rx_tail = 0;
 static uint32_t tx_tail = 0;
 
+/* Packet counters */
+static uint32_t g_tx_packets = 0;
+static uint32_t g_rx_packets = 0;
+static uint32_t g_tx_errors  = 0;
+static uint32_t g_rx_errors  = 0;
+
 /* =========================================================
  * MMIO register access
  * ========================================================= */
@@ -310,6 +316,7 @@ int e1000_send(const void* data, size_t len)
 
     if (!(tx_descs[idx].status & 0x01)) {
         klog_warn("e1000: TX descriptor busy, dropping packet");
+        g_tx_errors++;
         return -1;
     }
 
@@ -320,6 +327,7 @@ int e1000_send(const void* data, size_t len)
 
     tx_tail = (tx_tail + 1) % E1000_TX_DESC_COUNT;
     e1000_write(E1000_TDT, tx_tail);
+    g_tx_packets++;
 
     return 0;
 }
@@ -340,12 +348,24 @@ void e1000_receive_poll(void)
 
         if (desc->length > 0 && !(desc->errors)) {
             net_receive(rx_bufs[next], desc->length);
+            g_rx_packets++;
+        } else if (desc->errors) {
+            g_rx_errors++;
         }
 
         desc->status = 0;
         rx_tail = next;
         e1000_write(E1000_RDT, rx_tail);
     }
+}
+
+void e1000_get_stats(e1000_stats_t* out)
+{
+    if (!out) return;
+    out->tx_packets = g_tx_packets;
+    out->rx_packets = g_rx_packets;
+    out->tx_errors  = g_tx_errors;
+    out->rx_errors  = g_rx_errors;
 }
 
 void e1000_irq_handler(void* regs)
