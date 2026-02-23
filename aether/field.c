@@ -171,9 +171,11 @@ void field_compose(canvas_t* c)
             if (!s || s->cur_alpha == 0 || s->cur_w <= 0 || s->cur_h <= 0)
                 continue;
 
-            int slot = i - g_ctx.active_idx;
-            if (g_ctx.transitioning)
-                ; /* use raw slot during transition */
+            /* Past the midpoint of a transition, depth-sort by target */
+            int depth_ref = (g_ctx.transitioning &&
+                             g_ctx.trans_frame >= CTX_TRANSITION_FRAMES / 2)
+                          ? g_ctx.trans_target : g_ctx.active_idx;
+            int slot = i - depth_ref;
 
             bool is_pass = false;
             if (pass == 0 && (slot <= -2 || slot >= 2)) is_pass = true;

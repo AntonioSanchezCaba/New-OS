@@ -51,6 +51,7 @@ typedef struct {
     uint32_t pid;
     uint32_t cpu_pct;
     uint32_t mem_kb;
+    uint64_t prev_ticks;  /* for delta-based CPU% */
 } sm_proc_t;
 
 typedef struct {
@@ -88,19 +89,18 @@ static void sm_collect(void)
 
     /* Memory — use kheap_used() / kheap_free() from memory.h */
     size_t used = kheap_used();
-    size_t free = kheap_free();
+    size_t free_mem = kheap_free();
     g_sm.mem_used_kb  = (uint32_t)(used / 1024);
-    g_sm.mem_total_kb = (uint32_t)((used + free) / 1024);
+    g_sm.mem_total_kb = (uint32_t)((used + free_mem) / 1024);
 
-    /* CPU — approximate from scheduler ticks vs timer ticks.
-     * Use total_ticks of all running processes as a proxy.
-     * Simple: show a cycling "load" based on tick counter. */
-    static uint64_t prev_ticks = 0;
-    uint64_t now_ticks = scheduler_ticks();
-    uint64_t delta = now_ticks - prev_ticks;
-    prev_ticks = now_ticks;
-    /* Estimate: if more than 1 tick per 2ms interval, CPU is busy */
-    g_sm.cpu_pct = (delta > 0 && delta < 100) ? (uint32_t)(delta * 2) : 0;
+    /* CPU — delta scheduler ticks vs previous sample */
+    static uint64_t prev_sched = 0;
+    uint64_t now_sched = scheduler_ticks();
+    uint64_t sched_delta = now_sched - prev_sched;
+    prev_sched = now_sched;
+
+    g_sm.cpu_pct = (sched_delta > 0 && sched_delta < 100)
+                 ? (uint32_t)(sched_delta * 2) : 0;
     if (g_sm.cpu_pct > 100) g_sm.cpu_pct = 100;
 
     /* Record history */
@@ -111,16 +111,46 @@ static void sm_collect(void)
             : 0;
     g_sm.hist_pos = (g_sm.hist_pos + 1) % SM_GRAPH_HIST;
 
-    /* Process list — walk process_list linked list */
+    /* Snapshot previous per-process ticks for delta CPU% */
+    uint64_t old_ticks[SM_MAX_PROCS];
+    uint32_t old_pids [SM_MAX_PROCS];
+    int old_count = g_sm.proc_count;
+    for (int i = 0; i < old_count; i++) {
+        old_ticks[i] = g_sm.procs[i].prev_ticks;
+        old_pids [i] = g_sm.procs[i].pid;
+    }
+
+    /* Walk process list */
     g_sm.proc_count = 0;
     process_t* p = process_list;
     while (p && g_sm.proc_count < SM_MAX_PROCS) {
         if (p->state != PROC_STATE_UNUSED && p->state != PROC_STATE_DEAD) {
-            strncpy(g_sm.procs[g_sm.proc_count].name, p->name, 31);
-            g_sm.procs[g_sm.proc_count].name[31] = '\0';
-            g_sm.procs[g_sm.proc_count].pid     = (uint32_t)p->pid;
-            g_sm.procs[g_sm.proc_count].cpu_pct = 0; /* no per-proc cpu% */
-            g_sm.procs[g_sm.proc_count].mem_kb  = 0;
+            int idx = g_sm.proc_count;
+            strncpy(g_sm.procs[idx].name, p->name, 31);
+            g_sm.procs[idx].name[31] = '\0';
+            g_sm.procs[idx].pid = (uint32_t)p->pid;
+
+            /* Find saved ticks for this PID to compute delta CPU% */
+            uint64_t prev_proc = 0;
+            for (int j = 0; j < old_count; j++) {
+                if (old_pids[j] == (uint32_t)p->pid) {
+                    prev_proc = old_ticks[j];
+                    break;
+                }
+            }
+            uint64_t proc_delta = p->total_ticks - prev_proc;
+            g_sm.procs[idx].prev_ticks = p->total_ticks;
+            g_sm.procs[idx].cpu_pct = (sched_delta > 0)
+                ? (uint32_t)((proc_delta * 100) / sched_delta)
+                : 0;
+            if (g_sm.procs[idx].cpu_pct > 100)
+                g_sm.procs[idx].cpu_pct = 100;
+
+            /* Memory: estimate from process heap size */
+            uint64_t heap_bytes = (p->heap_end > p->heap_start)
+                                ? (p->heap_end - p->heap_start) : 0;
+            g_sm.procs[idx].mem_kb = (uint32_t)(heap_bytes / 1024);
+
             g_sm.proc_count++;
         }
         p = p->next;
