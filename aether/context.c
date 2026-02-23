@@ -2,6 +2,7 @@
  * aether/context.c — Context Engine (surface navigation)
  */
 #include <aether/context.h>
+#include <aether/are.h>
 #include <aether/surface.h>
 #include <aether/field.h>
 #include <memory.h>

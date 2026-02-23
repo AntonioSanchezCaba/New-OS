@@ -17,18 +17,30 @@
 #include <kernel.h>
 #include <string.h>
 
+/* Helper: get ATA drive pointer from index stored in fat32_fs_t */
+static inline ata_drive_t* fat32_get_drive(int dev)
+{
+    extern ata_drive_t ata_drives[4];
+    if (dev < 0 || dev >= 4) return NULL;
+    return &ata_drives[dev];
+}
+
 fat32_fs_t fat32_mounts[FAT32_MAX_MOUNTS];
 
 /* ── Low-level sector I/O ────────────────────────────────────────────── */
 
 static int fat32_read_sector(fat32_fs_t* fs, uint32_t lba, void* buf)
 {
-    return ata_read_sectors(fs->dev, fs->partition_start_lba + lba, 1, buf);
+    ata_drive_t* drv = fat32_get_drive(fs->dev);
+    if (!drv) return -EIO;
+    return ata_read_sectors(drv, fs->partition_start_lba + lba, 1, buf);
 }
 
 static int fat32_write_sector(fat32_fs_t* fs, uint32_t lba, const void* buf)
 {
-    return ata_write_sectors(fs->dev, fs->partition_start_lba + lba, 1, buf);
+    ata_drive_t* drv = fat32_get_drive(fs->dev);
+    if (!drv) return -EIO;
+    return ata_write_sectors(drv, fs->partition_start_lba + lba, 1, buf);
 }
 
 /* Ensure sector_buf contains the given LBA */

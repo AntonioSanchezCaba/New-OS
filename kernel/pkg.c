@@ -14,24 +14,27 @@
 
 pkg_db_t g_pkg_db;
 
-/* ── CRC32 ───────────────────────────────────────────────────────────── */
-
-static const uint32_t crc32_table[256] = {
-    0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
-    0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
-    0x0EDB8832u, 0x79DCB8A4u, 0xE0D5E91Bu, 0x97D2D988u,
-    0x09B64C2Bu, 0x7EB17CBCu, 0xE7B82D09u, 0x90BF1D90u,
-    /* ... (truncated for space; real impl uses full 256-entry table) */
-};
+/* ── CRC32 (ISO 3309 polynomial 0xEDB88320) ──────────────────────────── */
 
 uint32_t pkg_crc32(const void* data, size_t len)
 {
+    static uint32_t table[256];
+    static bool     table_ready = false;
+
+    if (!table_ready) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int j = 0; j < 8; j++)
+                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            table[i] = c;
+        }
+        table_ready = true;
+    }
+
     const uint8_t* buf = (const uint8_t*)data;
     uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; i++) {
-        uint8_t idx = (uint8_t)((crc ^ buf[i]) & 0xFF);
-        crc = (crc >> 8) ^ crc32_table[idx];
-    }
+    for (size_t i = 0; i < len; i++)
+        crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >> 8);
     return crc ^ 0xFFFFFFFFu;
 }
 
@@ -271,29 +274,20 @@ int pkg_verify(const char* aur_path)
     pkg_header_t hdr;
     vfs_read(node, 0, sizeof(hdr), &hdr);
 
-    /* Read payload and compute CRC32 */
-    uint8_t* buf = (uint8_t*)kmalloc(4096);
-    if (!buf) { vfs_close(node); return -ENOMEM; }
+    /* Read entire payload and compute CRC32 */
+    uint8_t* payload = (uint8_t*)kmalloc(hdr.payload_size);
+    if (!payload) { vfs_close(node); return -ENOMEM; }
 
-    uint32_t crc   = 0xFFFFFFFFu;
-    uint64_t off   = hdr.payload_offset;
-    uint32_t remaining = hdr.payload_size;
-
-    while (remaining > 0) {
-        size_t chunk = MIN(4096u, remaining);
-        ssize_t n = vfs_read(node, off, chunk, buf);
-        if (n <= 0) break;
-        /* Fold into running CRC */
-        for (ssize_t i = 0; i < n; i++) {
-            crc = (crc >> 8) ^ crc32_table[(crc ^ buf[i]) & 0xFF];
-        }
-        off       += n;
-        remaining -= n;
-    }
-    crc ^= 0xFFFFFFFFu;
-
-    kfree(buf);
+    ssize_t n = vfs_read(node, hdr.payload_offset, hdr.payload_size, payload);
     vfs_close(node);
+
+    if (n < (ssize_t)hdr.payload_size) {
+        kfree(payload);
+        return -EIO;
+    }
+
+    uint32_t crc = pkg_crc32(payload, hdr.payload_size);
+    kfree(payload);
 
     return (crc == hdr.checksum) ? 0 : -EINVAL;
 }

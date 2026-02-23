@@ -11,6 +11,7 @@
 #include <scheduler.h>
 #include <fs/vfs.h>
 #include <drivers/vga.h>
+#include <drivers/serial.h>
 #include <drivers/keyboard.h>
 #include <drivers/timer.h>
 #include <memory.h>

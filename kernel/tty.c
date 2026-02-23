@@ -1,4 +1,3 @@
-#include <errno.h>
 /*
  * kernel/tty.c - TTY / PTY subsystem
  *
@@ -8,11 +7,13 @@
 #include <kernel/tty.h>
 #include <kernel/signal.h>
 #include <process.h>
+#include <scheduler.h>
 #include <drivers/keyboard.h>
 #include <drivers/timer.h>
 #include <kernel.h>
 #include <memory.h>
 #include <string.h>
+#include <errno.h>
 
 /* ── State ───────────────────────────────────────────────────────────── */
 

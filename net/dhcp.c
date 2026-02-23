@@ -9,6 +9,7 @@
 #include <net/dhcp.h>
 #include <net/net.h>
 #include <net/ip.h>
+#include <net/tcp.h>
 #include <net/ethernet.h>
 #include <drivers/e1000.h>
 #include <drivers/timer.h>
@@ -166,7 +167,7 @@ static void dhcp_send(dhcp_packet_t* pkt)
 {
     /* Broadcast: 255.255.255.255 */
     uint32_t bcast = 0xFFFFFFFF;
-    udp_send(0, bcast, DHCP_CLIENT_PORT, DHCP_SERVER_PORT,
+    udp_send(bcast, DHCP_CLIENT_PORT, DHCP_SERVER_PORT,
              (const uint8_t*)pkt, sizeof(*pkt));
 }
 

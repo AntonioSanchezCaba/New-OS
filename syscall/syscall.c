@@ -15,6 +15,7 @@
 #include <memory.h>
 #include <fs/vfs.h>
 #include <drivers/vga.h>
+#include <drivers/serial.h>
 #include <drivers/timer.h>
 #include <drivers/framebuffer.h>
 #include <drivers/keyboard.h>

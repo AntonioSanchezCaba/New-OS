@@ -267,9 +267,9 @@ static void cmd_ls(term_t* t, const char* path)
 
     int col = 0;
     for (int i = 0; ; i++) {
-        vfs_node_t* child = dir->ops->readdir(dir, i);
+        vfs_dirent_t* child = dir->ops->readdir(dir, i);
         if (!child) break;
-        bool is_dir = (child->flags & VFS_DIRECTORY) != 0;
+        bool is_dir = (child->type == VFS_TYPE_DIR);
         uint32_t col_c = is_dir ? TERM_DIR : TERM_FG;
         char entry[32];
         strncpy(entry, child->name, 28);

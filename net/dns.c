@@ -7,6 +7,7 @@
 #include <net/dns.h>
 #include <net/net.h>
 #include <net/ip.h>
+#include <net/tcp.h>
 #include <drivers/timer.h>
 #include <string.h>
 #include <kernel.h>
@@ -180,7 +181,7 @@ uint32_t dns_resolve(const char* hostname)
     int qlen = build_query(hostname, qbuf, sizeof(qbuf));
     if (qlen < 0) return 0;
 
-    udp_send(ip_get_addr(), g_dns_server, DNS_CLIENT_PORT, DNS_PORT,
+    udp_send(g_dns_server, DNS_CLIENT_PORT, DNS_PORT,
              qbuf, qlen);
 
     /* Wait for response */

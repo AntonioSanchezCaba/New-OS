@@ -39,7 +39,7 @@ static clock_app_t g_clock;
 
 /* sin/cos approximation via lookup table — 360 entries */
 /* sin_table[i] = sin(i * PI/180) * 1024 */
-static const int16_t sin_table[360] = {
+static const int16_t sin_table[] = {
        0,  17,  35,  52,  70,  87, 105, 122, 139, 156, 173, 190, 207, 224, 241,
      258, 275, 292, 309, 325, 342, 358, 374, 390, 406, 422, 438, 453, 469, 484,
      499, 514, 529, 544, 559, 573, 587, 601, 615, 629, 642, 656, 669, 681, 694,

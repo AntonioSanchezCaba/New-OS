@@ -365,6 +365,7 @@ static void iv_on_event(wid_t wid, gui_event_t* evt, void* ud)
 /* =========================================================
  * Public API
  * ========================================================= */
+wid_t app_imgviewer_open(const char* path);  /* forward declaration */
 wid_t app_imgviewer_create(void) { return app_imgviewer_open(NULL); }
 
 wid_t app_imgviewer_open(const char* path)

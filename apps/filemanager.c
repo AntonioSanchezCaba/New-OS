@@ -98,11 +98,11 @@ static void fm_load_dir(fm_t* f, const char* path)
     }
 
     for (int i = 0; f->item_count < FM_MAX_ITEMS; i++) {
-        vfs_node_t* child = dir->ops->readdir(dir, i);
+        vfs_dirent_t* child = dir->ops->readdir(dir, i);
         if (!child) break;
         strncpy(f->items[f->item_count], child->name, 255);
         f->items[f->item_count][255] = '\0';
-        f->is_dir[f->item_count] = (child->flags & VFS_DIRECTORY) != 0;
+        f->is_dir[f->item_count] = (child->type == VFS_TYPE_DIR);
         f->item_count++;
     }
 }
@@ -140,11 +140,11 @@ static void fm_go_back(fm_t* f)
         f->is_dir[f->item_count++] = true;
     }
     for (int i = 0; f->item_count < FM_MAX_ITEMS; i++) {
-        vfs_node_t* child = dir->ops->readdir(dir, i);
+        vfs_dirent_t* child = dir->ops->readdir(dir, i);
         if (!child) break;
         strncpy(f->items[f->item_count], child->name, 255);
         f->items[f->item_count][255] = '\0';
-        f->is_dir[f->item_count] = (child->flags & VFS_DIRECTORY) != 0;
+        f->is_dir[f->item_count] = (child->type == VFS_TYPE_DIR);
         f->item_count++;
     }
 }

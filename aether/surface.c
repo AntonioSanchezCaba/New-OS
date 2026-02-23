@@ -163,6 +163,7 @@ canvas_t surface_canvas(sid_t id)
 {
     surface_t* s = surface_get(id);
     if (!s || !s->buf)
-        return (canvas_t){ NULL, 0, 0 };
-    return (canvas_t){ .pixels=s->buf, .width=s->buf_w, .height=s->buf_h };
+        return (canvas_t){ .pixels=NULL, .width=0, .height=0, .stride=0 };
+    return (canvas_t){ .pixels=s->buf, .width=s->buf_w, .height=s->buf_h,
+                       .stride=(int)s->buf_w };
 }

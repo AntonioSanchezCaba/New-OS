@@ -15,6 +15,7 @@
 #include <memory.h>
 #include <string.h>
 #include <process.h>
+#include <scheduler.h>
 #include <drivers/timer.h>
 
 /* ── Global socket table ─────────────────────────────────────────────── */
@@ -395,17 +396,6 @@ void sock_notify_accept(uint16_t port, ip4_addr_t remote_ip,
 }
 
 /* ── Syscall entry points ────────────────────────────────────────────── */
-
-#define EAFNOSUPPORT 97
-#define EPROTOTYPE   91
-#define ECONNREFUSED 111
-#define EOPNOTSUPP   95
-#define ENOTSUP      EOPNOTSUPP
-#define ENOTCONN     107
-#define EDESTADDRREQ 89
-#define ENOPROTOOPT  92
-#define EAGAIN       11
-#define ETIMEDOUT    110
 
 int64_t sys_socket(uint64_t domain, uint64_t type, uint64_t proto,
                     uint64_t a4, uint64_t a5, uint64_t a6)
