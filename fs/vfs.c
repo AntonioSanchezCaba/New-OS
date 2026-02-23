@@ -157,6 +157,10 @@ ssize_t vfs_write(vfs_node_t* node, off_t offset, size_t size, const void* buf)
 vfs_node_t* vfs_finddir(vfs_node_t* node, const char* name)
 {
     if (!node || !name) return NULL;
+
+    /* Follow mountpoint into the mounted filesystem root */
+    if (node->mount) node = node->mount;
+
     if (!(node->flags & VFS_DIRECTORY)) return NULL;
     if (!node->ops || !node->ops->finddir) return NULL;
     return node->ops->finddir(node, name);
@@ -166,6 +170,8 @@ vfs_node_t* vfs_finddir(vfs_node_t* node, const char* name)
 static vfs_dirent_t* _vfs_readdir_raw(vfs_node_t* node, uint32_t index)
 {
     if (!node) return NULL;
+    /* Follow mountpoint into mounted filesystem */
+    if (node->mount) node = node->mount;
     if (!(node->flags & VFS_DIRECTORY)) return NULL;
     if (!node->ops || !node->ops->readdir) return NULL;
     return node->ops->readdir(node, index);
@@ -256,9 +262,33 @@ int vfs_unlink(const char* path)
 
 int vfs_mount(const char* path, vfs_node_t* node, void* fs_data)
 {
-    (void)path; (void)node; (void)fs_data;
-    /* Simplified: only root mount is supported */
-    return -ENOSYS;
+    (void)fs_data;
+
+    if (!path || !node) return -EINVAL;
+
+    /* Special case: mount at root "/" */
+    if (path[0] == '/' && path[1] == '\0') {
+        vfs_root_node = node;
+        node->mountpoint = NULL;
+        kinfo("VFS: mounted root filesystem");
+        return 0;
+    }
+
+    /* Find the directory that will become the mount point */
+    vfs_node_t* mp = vfs_resolve_path(path);
+    if (!mp) {
+        /* Try to create the mount point directory if it doesn't exist */
+        vfs_mkdir(path);
+        mp = vfs_resolve_path(path);
+        if (!mp) return -ENOENT;
+    }
+    if (!(mp->flags & VFS_DIRECTORY)) return -ENOTDIR;
+
+    mp->mount       = node;
+    node->mountpoint = mp;
+
+    kinfo("VFS: filesystem mounted at '%s'", path);
+    return 0;
 }
 
 /* ── vfs_stat ────────────────────────────────────────────────────────── */

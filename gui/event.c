@@ -52,13 +52,38 @@ void gui_post_key(int keycode, uint8_t mods, char ch, bool down)
 
 void gui_post_mouse(int x, int y, int dx, int dy, uint8_t buttons)
 {
-    gui_event_t evt;
-    evt.type          = GUI_EVENT_MOUSE_MOVE;
-    evt.mouse.x       = x;
-    evt.mouse.y       = y;
-    evt.mouse.dx      = dx;
-    evt.mouse.dy      = dy;
-    evt.mouse.buttons = buttons;
-    evt.mouse.scroll  = 0;
-    gui_event_push(&evt);
+    static uint8_t prev_buttons = 0;
+
+    /* Movement */
+    if (dx || dy) {
+        gui_event_t evt;
+        evt.type = GUI_EVENT_MOUSE_MOVE;
+        evt.mouse.x = x; evt.mouse.y = y;
+        evt.mouse.dx = dx; evt.mouse.dy = dy;
+        evt.mouse.buttons = buttons; evt.mouse.scroll = 0;
+        gui_event_push(&evt);
+    }
+
+    /* Button press transitions */
+    uint8_t pressed  = (uint8_t)( buttons & ~prev_buttons);
+    uint8_t released = (uint8_t)(~buttons &  prev_buttons);
+
+    if (pressed) {
+        gui_event_t evt;
+        evt.type = GUI_EVENT_MOUSE_DOWN;
+        evt.mouse.x = x; evt.mouse.y = y;
+        evt.mouse.dx = 0; evt.mouse.dy = 0;
+        evt.mouse.buttons = pressed; evt.mouse.scroll = 0;
+        gui_event_push(&evt);
+    }
+    if (released) {
+        gui_event_t evt;
+        evt.type = GUI_EVENT_MOUSE_UP;
+        evt.mouse.x = x; evt.mouse.y = y;
+        evt.mouse.dx = 0; evt.mouse.dy = 0;
+        evt.mouse.buttons = released; evt.mouse.scroll = 0;
+        gui_event_push(&evt);
+    }
+
+    prev_buttons = buttons;
 }

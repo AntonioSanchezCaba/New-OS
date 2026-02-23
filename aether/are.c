@@ -24,6 +24,7 @@
 #include <drivers/framebuffer.h>
 #include <drivers/timer.h>
 #include <drivers/mouse.h>
+#include <drivers/cursor.h>
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <kernel/version.h>
@@ -345,7 +346,11 @@ void are_run(void)
 
         field_draw_nav_dots(&screen);
 
-        /* 6. Flip */
+        /* 6. Render software cursor over the composed frame */
+        cursor_erase();   /* restore pixels under old cursor position */
+        cursor_render();  /* save pixels, blit cursor sprite */
+
+        /* 7. Flip */
         fb_flip();
 
         scheduler_yield();
