@@ -561,7 +561,12 @@ int64_t sys_sysinfo(uint64_t buf_addr, uint64_t a2, uint64_t a3,
     si->uptime       = timer_get_ticks() / 100;
     si->totalram     = (uint64_t)pmm_total_frames() * PAGE_SIZE;
     si->freeram      = (uint64_t)pmm_free_frames_count() * PAGE_SIZE;
-    si->procs        = 0; /* TODO: count from process list */
+    /* Count live processes */
+    uint32_t proc_count = 0;
+    for (process_t* q = process_list; q; q = q->next)
+        if (q->state != PROC_STATE_UNUSED && q->state != PROC_STATE_DEAD)
+            proc_count++;
+    si->procs        = proc_count;
     si->cpu_freq_mhz = 2400;
     return 0;
 }

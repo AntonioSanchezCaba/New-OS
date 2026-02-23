@@ -11,6 +11,7 @@
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <gui/event.h>
+#include <fs/vfs.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
@@ -73,6 +74,55 @@ static const acolor_t accent_colors[] = {
     ACOLOR(0x20, 0xC0, 0x60, 0xFF),
     ACOLOR(0xFF, 0x80, 0x20, 0xFF),
 };
+
+/* =========================================================
+ * Persistence (/etc/aether.conf)
+ * ========================================================= */
+#define ST_CONF_PATH  "/etc/aether.conf"
+
+static void settings_save(void)
+{
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "brightness=%d\naccent=%d\n",
+                     g_st.brightness, g_st.accent_idx);
+    vfs_node_t* f = vfs_open(ST_CONF_PATH, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!f) {
+        vfs_create(ST_CONF_PATH, 0644);
+        f = vfs_open(ST_CONF_PATH, O_WRONLY | O_TRUNC);
+    }
+    if (f) { vfs_write(f, 0, (size_t)n, buf); vfs_close(f); }
+}
+
+static void settings_load(void)
+{
+    vfs_node_t* f = vfs_open(ST_CONF_PATH, O_RDONLY);
+    if (!f) return;
+    char buf[128];
+    ssize_t n = vfs_read(f, 0, sizeof(buf) - 1, buf);
+    vfs_close(f);
+    if (n <= 0) return;
+    buf[n] = '\0';
+    char* p = buf;
+    while (*p) {
+        char* lend = p;
+        while (*lend && *lend != '\n') lend++;
+        char saved = *lend; *lend = '\0';
+        char* eq = p;
+        while (*eq && *eq != '=') eq++;
+        if (*eq == '=') {
+            *eq = '\0';
+            int val = 0;
+            const char* vp = eq + 1;
+            while (*vp >= '0' && *vp <= '9') val = val * 10 + (*vp++ - '0');
+            if (strcmp(p, "brightness") == 0 && val >= 0 && val <= 100)
+                g_st.brightness = val;
+            else if (strcmp(p, "accent") == 0 && val >= 0 && val < 4)
+                g_st.accent_idx = val;
+        }
+        if (!saved) break;
+        p = lend + 1;
+    }
+}
 
 /* =========================================================
  * Render helpers
@@ -262,6 +312,7 @@ static void st_input(sid_t id, const input_event_t* ev, void* ud)
                     for (int i = 0; i < 4; i++) {
                         if (mx >= swatch_x && mx < swatch_x + 48) {
                             g_st.accent_idx = i;
+                            settings_save();
                             surface_invalidate(id);
                             break;
                         }
@@ -277,6 +328,7 @@ static void st_input(sid_t id, const input_event_t* ev, void* ud)
                     int sx = ST_LABEL_W;
                     if (mx >= sx && mx < sx + ST_VAL_W) {
                         g_st.brightness = (mx - sx) * 100 / ST_VAL_W;
+                        settings_save();
                         surface_invalidate(id);
                     }
                 }
@@ -307,8 +359,9 @@ void surface_settings_init(uint32_t w, uint32_t h)
     memset(&g_st, 0, sizeof(g_st));
     g_st.surf_w     = w;
     g_st.surf_h     = h;
-    g_st.brightness = 80;
+    g_st.brightness = 80;  /* defaults — may be overridden by settings_load */
     g_st.accent_idx = 0;
+    settings_load();       /* restore last saved settings */
 
     g_st.sid = are_add_surface(SURF_APP, w, h,
                                "Settings", "S",
