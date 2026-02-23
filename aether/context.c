@@ -116,8 +116,8 @@ void context_tick(void)
         surface_t* s = surface_get(g_ctx.field[i]);
         if (!s) continue;
 
-        /* Compute effective active index (lerp during transition) */
-        int active = g_ctx.transitioning ? g_ctx.active_idx : g_ctx.active_idx;
+        /* Compute effective active index (source slot during transition) */
+        int active = g_ctx.active_idx;
         int slot_offset = i - active;
 
         /* During transition: blend toward target */

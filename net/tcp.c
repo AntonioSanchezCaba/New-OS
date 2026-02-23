@@ -11,6 +11,7 @@
 #include <string.h>
 #include <memory.h>
 #include <drivers/timer.h>
+#include <scheduler.h>
 
 /* =========================================================
  * Socket table
@@ -147,8 +148,7 @@ int tcp_connect(ip4_addr_t ip, uint16_t port)
          timer_get_ticks() - start < TIMER_FREQ * 5; ) {
         if (net_iface.poll) net_iface.poll();
         if (s->state == TCP_ESTABLISHED) return sock;
-        /* Busy wait with brief pause */
-        for (volatile int i = 0; i < 1000; i++) __asm__("pause");
+        scheduler_yield();  /* yield instead of busy-spinning */
     }
 
     /* Timeout */

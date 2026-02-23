@@ -68,6 +68,9 @@ typedef struct {
     /* Blink counter */
     uint32_t     blink_frame;
 
+    /* Current working directory */
+    char         cwd[VFS_NAME_MAX + 1];
+
     /* Surface dimensions */
     uint32_t     surf_w;
     uint32_t     surf_h;
@@ -151,6 +154,29 @@ static void term_puts(const char* s)
 }
 
 /* =========================================================
+ * Resolve a path argument against CWD
+ * ========================================================= */
+static void term_make_path(const char* arg, char* out, int out_len)
+{
+    if (!arg || !arg[0]) {
+        strncpy(out, g_term.cwd, out_len - 1);
+        out[out_len - 1] = '\0';
+    } else if (arg[0] == '/') {
+        strncpy(out, arg, out_len - 1);
+        out[out_len - 1] = '\0';
+    } else {
+        /* Relative: join CWD + "/" + arg */
+        int n = 0;
+        const char* c = g_term.cwd;
+        while (*c && n < out_len - 1) out[n++] = *c++;
+        if (n > 1 && out[n-1] != '/' && n < out_len - 1) out[n++] = '/';
+        const char* a = arg;
+        while (*a && n < out_len - 1) out[n++] = *a++;
+        out[n] = '\0';
+    }
+}
+
+/* =========================================================
  * Simple built-in shell
  * ========================================================= */
 static void shell_exec(const char* cmd)
@@ -167,8 +193,11 @@ static void shell_exec(const char* cmd)
         term_puts("  version   — OS version\r\n");
         term_puts("  uname     — system info\r\n");
         term_puts("  echo ...  — echo text\r\n");
-        term_puts("  ls [path] — list directory (default: /)\r\n");
+        term_puts("  ls [path] — list directory (default: cwd)\r\n");
         term_puts("  cat path  — print file contents\r\n");
+        term_puts("  cd path   — change directory\r\n");
+        term_puts("  pwd       — print working directory\r\n");
+        term_puts("  mkdir dir — create directory\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
         for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
         g_term.cx = 0; g_term.cy = 0;
@@ -181,10 +210,11 @@ static void shell_exec(const char* cmd)
         term_puts(cmd + 5);
         term_putchar_raw('\n');
     } else if (strncmp(cmd, "ls", 2) == 0) {
-        /* Optional path argument: "ls /path" */
-        const char* path = "/";
-        if (cmd[2] == ' ' && cmd[3]) path = cmd + 3;
-        vfs_node_t* dir = vfs_resolve_path(path);
+        /* Optional path argument: "ls [path]" — default: CWD */
+        char lspath[VFS_NAME_MAX + 1];
+        term_make_path((cmd[2] == ' ' && cmd[3]) ? cmd + 3 : NULL,
+                       lspath, sizeof(lspath));
+        vfs_node_t* dir = vfs_resolve_path(lspath);
         if (!dir || !(dir->flags & VFS_DIRECTORY)) {
             term_puts("ls: no such directory\r\n");
         } else {
@@ -219,6 +249,44 @@ static void shell_exec(const char* cmd)
             }
             term_putchar_raw('\n');
         }
+    } else if (strncmp(cmd, "pwd", 3) == 0) {
+        term_puts(g_term.cwd);
+        term_puts("\r\n");
+    } else if (strncmp(cmd, "cd", 2) == 0) {
+        const char* arg = (cmd[2] == ' ' && cmd[3]) ? cmd + 3 : "/";
+        if (strcmp(arg, "..") == 0) {
+            /* Navigate up one directory level */
+            int len = (int)strlen(g_term.cwd);
+            if (len > 1) {
+                if (g_term.cwd[len - 1] == '/') len--;
+                while (len > 1 && g_term.cwd[len - 1] != '/') len--;
+                g_term.cwd[len > 1 ? len - 1 : 1] = '\0';
+            }
+        } else {
+            char newpath[VFS_NAME_MAX + 1];
+            term_make_path(arg, newpath, sizeof(newpath));
+            vfs_node_t* d = vfs_resolve_path(newpath);
+            if (!d || !(d->flags & VFS_DIRECTORY)) {
+                term_puts("cd: no such directory: ");
+                term_puts(arg);
+                term_puts("\r\n");
+            } else {
+                strncpy(g_term.cwd, newpath, sizeof(g_term.cwd) - 1);
+                g_term.cwd[sizeof(g_term.cwd) - 1] = '\0';
+            }
+        }
+    } else if (strncmp(cmd, "mkdir ", 6) == 0) {
+        char newdir[VFS_NAME_MAX + 1];
+        term_make_path(cmd + 6, newdir, sizeof(newdir));
+        if (vfs_mkdir(newdir) == 0) {
+            term_puts("mkdir: created ");
+            term_puts(newdir);
+            term_puts("\r\n");
+        } else {
+            term_puts("mkdir: failed to create ");
+            term_puts(newdir);
+            term_puts("\r\n");
+        }
     } else {
         term_puts("unknown command: ");
         term_puts(cmd);
@@ -228,7 +296,9 @@ static void shell_exec(const char* cmd)
 
 static void shell_prompt(void)
 {
-    term_puts("\r\n\x1b[32mare\x1b[0m $ ");
+    term_puts("\r\nare:");
+    term_puts(g_term.cwd);
+    term_puts(" $ ");
 }
 
 /* =========================================================
@@ -332,6 +402,7 @@ void surface_terminal_init(uint32_t w, uint32_t h)
     memset(&g_term, 0, sizeof(g_term));
     g_term.cur_fg  = TC_FG;
     g_term.cur_bg  = ACOLOR(0,0,0,0);
+    g_term.cwd[0] = '/'; g_term.cwd[1] = '\0';
     g_term.surf_w  = w;
     g_term.surf_h  = h;
 
