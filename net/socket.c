@@ -276,8 +276,13 @@ ssize_t sock_sendto(int sd, const void* buf, size_t len, int flags,
 ssize_t sock_recvfrom(int sd, void* buf, size_t len, int flags,
                        sockaddr_in_t* src)
 {
-    (void)src;
-    return sock_recv(sd, buf, len, flags);
+    ssize_t n = sock_recv(sd, buf, len, flags);
+    /* Populate sender address (set by sock_deliver_udp on arrival) */
+    if (n >= 0 && src) {
+        sock_t* s = sock_get(sd);
+        if (s) *src = s->remote;
+    }
+    return n;
 }
 
 /* ── setsockopt / getsockopt ─────────────────────────────────────────── */
@@ -466,4 +471,31 @@ int64_t sys_recvfrom(uint64_t sd, uint64_t buf, uint64_t len, uint64_t flags,
     if (!buf) return -EFAULT;
     return sock_recvfrom((int)sd, (void*)buf, (size_t)len, (int)flags,
                           (sockaddr_in_t*)addr);
+}
+
+int64_t sys_setsockopt(uint64_t sd, uint64_t level, uint64_t optname,
+                        uint64_t optval, uint64_t optlen, uint64_t a6)
+{
+    (void)a6;
+    if (!optval) return -EFAULT;
+    return sock_setsockopt((int)sd, (int)level, (int)optname,
+                            (const void*)optval, (size_t)optlen);
+}
+
+int64_t sys_getsockopt(uint64_t sd, uint64_t level, uint64_t optname,
+                        uint64_t optval, uint64_t optlen_ptr, uint64_t a6)
+{
+    (void)a6;
+    if (!optval || !optlen_ptr) return -EFAULT;
+    return sock_getsockopt((int)sd, (int)level, (int)optname,
+                            (void*)optval, (size_t*)optlen_ptr);
+}
+
+int64_t sys_shutdown(uint64_t sd, uint64_t how, uint64_t a3,
+                      uint64_t a4, uint64_t a5, uint64_t a6)
+{
+    (void)a3; (void)a4; (void)a5; (void)a6;
+    int rc = sock_shutdown((int)sd, (int)how);
+    if (rc == 0) sock_close((int)sd);  /* fully release on shutdown */
+    return rc;
 }

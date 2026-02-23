@@ -714,6 +714,9 @@ void syscall_init(void)
     syscall_table[SYS_RECV]       = sys_recv;
     syscall_table[SYS_SENDTO]     = sys_sendto;
     syscall_table[SYS_RECVFROM]   = sys_recvfrom;
+    syscall_table[SYS_SETSOCKOPT] = sys_setsockopt;
+    syscall_table[SYS_GETSOCKOPT] = sys_getsockopt;
+    syscall_table[SYS_SHUTDOWN]   = sys_shutdown;
 
     /* Shared memory */
     syscall_table[SYS_SHM_OPEN]   = sys_shm_open;

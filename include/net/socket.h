@@ -169,5 +169,11 @@ int64_t sys_sendto(uint64_t sd, uint64_t buf, uint64_t len, uint64_t flags,
                     uint64_t addr, uint64_t addrlen);
 int64_t sys_recvfrom(uint64_t sd, uint64_t buf, uint64_t len, uint64_t flags,
                       uint64_t addr, uint64_t addrlen_ptr);
+int64_t sys_setsockopt(uint64_t sd, uint64_t level, uint64_t optname,
+                        uint64_t optval, uint64_t optlen, uint64_t a6);
+int64_t sys_getsockopt(uint64_t sd, uint64_t level, uint64_t optname,
+                        uint64_t optval, uint64_t optlen_ptr, uint64_t a6);
+int64_t sys_shutdown(uint64_t sd, uint64_t how, uint64_t a3,
+                      uint64_t a4, uint64_t a5, uint64_t a6);
 
 #endif /* NET_SOCKET_H */
