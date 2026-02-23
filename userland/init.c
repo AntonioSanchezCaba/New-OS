@@ -51,9 +51,11 @@ void init_process_entry(void)
 {
     kinfo("Init process started (PID 1)");
 
-    /* Mount the RAM filesystem as root */
-    vfs_node_t* root = ramfs_create_root();
-    vfs_mount_root(root);
+    /* Mount RAM filesystem as root (kernel mounts it first; guard here) */
+    if (!vfs_root()) {
+        vfs_node_t* root = ramfs_create_root();
+        vfs_mount_root(root);
+    }
 
     /* Give the system a moment to settle */
     timer_sleep_ms(100);

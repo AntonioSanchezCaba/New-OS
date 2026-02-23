@@ -12,6 +12,7 @@
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <gui/event.h>
+#include <fs/vfs.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
@@ -166,7 +167,8 @@ static void shell_exec(const char* cmd)
         term_puts("  version   — OS version\r\n");
         term_puts("  uname     — system info\r\n");
         term_puts("  echo ...  — echo text\r\n");
-        term_puts("  ls        — list root VFS\r\n");
+        term_puts("  ls [path] — list directory (default: /)\r\n");
+        term_puts("  cat path  — print file contents\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
         for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
         g_term.cx = 0; g_term.cy = 0;
@@ -179,7 +181,44 @@ static void shell_exec(const char* cmd)
         term_puts(cmd + 5);
         term_putchar_raw('\n');
     } else if (strncmp(cmd, "ls", 2) == 0) {
-        term_puts("sys  proc  tmp  dev\r\n");
+        /* Optional path argument: "ls /path" */
+        const char* path = "/";
+        if (cmd[2] == ' ' && cmd[3]) path = cmd + 3;
+        vfs_node_t* dir = vfs_resolve_path(path);
+        if (!dir || !(dir->flags & VFS_DIRECTORY)) {
+            term_puts("ls: no such directory\r\n");
+        } else {
+            vfs_dirent_t ent;
+            uint32_t idx = 0;
+            int col = 0;
+            while (vfs_readdir(dir, idx, &ent) == 0) {
+                term_puts(ent.name);
+                if (ent.type == VFS_TYPE_DIR) term_putchar_raw('/');
+                term_puts("  ");
+                col++;
+                if (col >= 6) { term_puts("\r\n"); col = 0; }
+                idx++;
+            }
+            if (col > 0) term_puts("\r\n");
+        }
+    } else if (strncmp(cmd, "cat ", 4) == 0) {
+        const char* path = cmd + 4;
+        vfs_node_t* f = vfs_resolve_path(path);
+        if (!f || (f->flags & VFS_DIRECTORY)) {
+            term_puts("cat: cannot read: ");
+            term_puts(path);
+            term_putchar_raw('\n');
+        } else {
+            char fbuf[256];
+            off_t off = 0;
+            ssize_t n;
+            while ((n = vfs_read(f, off, sizeof(fbuf) - 1, fbuf)) > 0) {
+                fbuf[n] = '\0';
+                term_puts(fbuf);
+                off += n;
+            }
+            term_putchar_raw('\n');
+        }
     } else {
         term_puts("unknown command: ");
         term_puts(cmd);

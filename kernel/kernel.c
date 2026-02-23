@@ -213,6 +213,13 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("Initializing VFS...");
     vfs_init();
 
+    /* Mount ramfs as VFS root BEFORE diskman_init() calls vfs_mkdir("/mnt") */
+    {
+        extern vfs_node_t* ramfs_create_root(void);
+        vfs_mount_root(ramfs_create_root());
+        kinfo("VFS: ramfs mounted as root");
+    }
+
     kinfo("Scanning disks and mounting partitions...");
     diskman_init();
 
