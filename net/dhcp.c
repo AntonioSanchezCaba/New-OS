@@ -7,6 +7,7 @@
  * Uses the existing UDP/IP/Ethernet layers from the AetherOS network stack.
  */
 #include <net/dhcp.h>
+#include <net/dns.h>
 #include <net/net.h>
 #include <net/ip.h>
 #include <net/tcp.h>
@@ -22,7 +23,10 @@
  * ========================================================= */
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
-#define DHCP_MAGIC       0x63825363UL  /* Magic cookie */
+/* Magic cookie: RFC value 0x63825363 in network byte order;
+ * stored as 0x63538263 in host (little-endian) byte order so the
+ * wire bytes are [0x63, 0x82, 0x53, 0x63] as required by RFC 2132. */
+#define DHCP_MAGIC       0x63538263UL
 
 /* DHCP op codes */
 #define DHCP_DISCOVER  1
@@ -112,8 +116,8 @@ static void build_discover(dhcp_packet_t* pkt)
     pkt->htype  = 1;       /* Ethernet */
     pkt->hlen   = 6;
     pkt->xid    = g_xid;
-    pkt->flags  = 0x0080;  /* Broadcast flag (network order: big-endian) */
-    pkt->magic  = 0x63538263UL; /* little-endian representation of magic */
+    pkt->flags  = 0x0080;  /* 0x8000 broadcast flag in network byte order */
+    pkt->magic  = DHCP_MAGIC;
 
     /* Our MAC */
     uint8_t* mac = e1000_mac.b;
@@ -144,7 +148,7 @@ static void build_request(dhcp_packet_t* pkt,
     pkt->hlen   = 6;
     pkt->xid    = g_xid;
     pkt->flags  = 0x0080;
-    pkt->magic  = 0x63538263UL;
+    pkt->magic  = DHCP_MAGIC;
 
     uint8_t* mac = e1000_mac.b;
     memcpy(pkt->chaddr, mac, 6);
@@ -188,7 +192,7 @@ static int dhcp_wait(uint8_t want_type, dhcp_packet_t* out,
         dhcp_packet_t* p = (dhcp_packet_t*)buf;
         if (p->xid != g_xid) continue;
         if (p->op  != 2)     continue;  /* Must be BOOTREPLY */
-        if (p->magic != 0x63538263UL) continue;
+        if (p->magic != DHCP_MAGIC) continue;
 
         /* Check message type option */
         uint8_t mtype = 0;
@@ -257,6 +261,7 @@ int dhcp_discover(void)
     ip_set_addr(g_lease.ip);
     ip_set_gateway(g_lease.gateway);
     ip_set_netmask(g_lease.netmask);
+    if (g_lease.dns) dns_set_server(g_lease.dns);
 
     g_has_lease = true;
     kinfo("DHCP: lease acquired ip=%08X gw=%08X mask=%08X dns=%08X",

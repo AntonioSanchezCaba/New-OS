@@ -37,6 +37,8 @@ extern wid_t app_terminal_create(void);
 extern wid_t app_filemanager_create(void);
 extern wid_t app_texteditor_create(void);
 extern wid_t app_sysmonitor_create(void);
+extern wid_t app_settings_create(void);
+extern wid_t app_netconfig_create(void);
 
 /* =========================================================
  * Layout constants
@@ -100,14 +102,16 @@ static void launch_terminal(void)    { wid_t w = app_terminal_create();   if (w 
 static void launch_files(void)       { wid_t w = app_filemanager_create(); if (w >= 0) launcher_track_window(w, "Files"); }
 static void launch_editor(void)      { wid_t w = app_texteditor_create();  if (w >= 0) launcher_track_window(w, "Editor"); }
 static void launch_monitor(void)     { wid_t w = app_sysmonitor_create();  if (w >= 0) launcher_track_window(w, "Monitor"); }
+static void launch_settings(void)    { wid_t w = app_settings_create();    if (w >= 0) launcher_track_window(w, "Settings"); }
+static void launch_network(void)     { wid_t w = app_netconfig_create();   if (w >= 0) launcher_track_window(w, "Network"); }
 
 static const app_def_t g_apps[] = {
-    { "Terminal",     ">_", RGB(0x14, 0x28, 0x14), launch_terminal },
-    { "Files",        "[]", RGB(0x14, 0x28, 0x50), launch_files    },
-    { "Text Editor",  "Ed", RGB(0x28, 0x14, 0x50), launch_editor   },
-    { "Sys Monitor",  "Mn", RGB(0x50, 0x14, 0x14), launch_monitor  },
-    { "Settings",     "St", RGB(0x28, 0x28, 0x28), NULL             },
-    { "Network",      "Ne", RGB(0x14, 0x50, 0x50), NULL             },
+    { "Terminal",     ">_", RGB(0x14, 0x28, 0x14), launch_terminal  },
+    { "Files",        "[]", RGB(0x14, 0x28, 0x50), launch_files     },
+    { "Text Editor",  "Ed", RGB(0x28, 0x14, 0x50), launch_editor    },
+    { "Sys Monitor",  "Mn", RGB(0x50, 0x14, 0x14), launch_monitor   },
+    { "Settings",     "St", RGB(0x28, 0x28, 0x28), launch_settings  },
+    { "Network",      "Ne", RGB(0x14, 0x50, 0x50), launch_network   },
 };
 #define N_APPS  ((int)(sizeof(g_apps) / sizeof(g_apps[0])))
 

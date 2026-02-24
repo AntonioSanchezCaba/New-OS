@@ -176,7 +176,8 @@ uint32_t dns_resolve(const char* hostname)
         return 0;
     }
 
-    /* Build and send query */
+    /* Build and send query; save the query ID for response validation */
+    uint16_t sent_id = g_query_id;
     uint8_t qbuf[512];
     int qlen = build_query(hostname, qbuf, sizeof(qbuf));
     if (qlen < 0) return 0;
@@ -190,6 +191,10 @@ uint32_t dns_resolve(const char* hostname)
         uint8_t rbuf[512];
         int n = udp_recv_poll(DNS_CLIENT_PORT, rbuf, (int)sizeof(rbuf));
         if (n < (int)sizeof(dns_header_t)) continue;
+
+        /* Validate transaction ID before parsing */
+        const dns_header_t* rh = (const dns_header_t*)rbuf;
+        if (rh->id != sent_id) continue;
 
         uint32_t addr = parse_response(rbuf, n);
         if (!addr) continue;
