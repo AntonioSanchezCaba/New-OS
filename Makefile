@@ -223,7 +223,11 @@ ALL_OBJS  := $(BOOT_OBJS) $(C_OBJS)
 
 .PHONY: all run debug clean iso dirs
 
-all: iso
+# Default target: build the kernel ELF.  ISO creation is optional
+# (requires grub-mkrescue + xorriso); use `make iso` explicitly.
+all: $(KERNEL_BIN)
+	@echo "  Kernel built: $(KERNEL_BIN) ($$(du -h $(KERNEL_BIN) | cut -f1))"
+	@echo "  Run 'make iso' to create a bootable ISO (needs grub-mkrescue)."
 
 # Create build directory structure
 dirs:
