@@ -286,24 +286,23 @@ static void print_banner(void)
 /*
  * aether_compositor_thread — wraps compositor_run for the process API
  */
+__attribute__((unused))
 static void aether_compositor_thread(void)
 {
     compositor_init();
     compositor_run();
 }
 
-/*
- * aether_input_thread — wraps input_svc_run for the process API
- */
+/* aether_input_thread — wraps input_svc_run for the process API */
+__attribute__((unused))
 static void aether_input_thread(void)
 {
     input_svc_init();
     input_svc_run();
 }
 
-/*
- * aether_launcher_thread — wraps launcher_run for the process API
- */
+/* aether_launcher_thread — wraps launcher_run for the process API */
+__attribute__((unused))
 static void aether_launcher_thread(void)
 {
     launcher_init();
@@ -338,38 +337,17 @@ static void init_userland(void)
         return;
     }
 
-    /* aether.display — Compositor service */
-    kinfo("Starting aether.display (compositor)...");
-    process_t* comp_proc = process_create("aether.display",
-                                           aether_compositor_thread, false);
-    if (comp_proc) {
-        scheduler_add(comp_proc);
-        kinfo("  [OK] aether.display (PID %u)", comp_proc->pid);
-    } else {
-        klog_warn("  [FAIL] compositor thread creation failed");
-    }
-
-    /* aether.input — Input service */
-    kinfo("Starting aether.input (input service)...");
-    process_t* input_proc = process_create("aether.input",
-                                            aether_input_thread, false);
-    if (input_proc) {
-        scheduler_add(input_proc);
-        kinfo("  [OK] aether.input (PID %u)", input_proc->pid);
-    } else {
-        klog_warn("  [FAIL] input service thread creation failed");
-    }
-
-    /* aether.launcher — Application launcher */
-    kinfo("Starting aether.launcher...");
-    process_t* launch_proc = process_create("aether.launcher",
-                                             aether_launcher_thread, false);
-    if (launch_proc) {
-        scheduler_add(launch_proc);
-        kinfo("  [OK] aether.launcher (PID %u)", launch_proc->pid);
-    } else {
-        klog_warn("  [FAIL] launcher thread creation failed");
-    }
+    /*
+     * ARE (Aether Render Engine) is the authoritative framebuffer owner
+     * and input consumer.  The legacy compositor, input service, and
+     * launcher service threads would conflict with ARE — both would write
+     * to the framebuffer at 60 Hz and drain the same keyboard/mouse
+     * queues.  Skip them when ARE is active.
+     *
+     * ARE is always active when fb_ready() == true (i.e. gui_available()).
+     * Left in place for headless / regression builds that set ARE_DISABLE.
+     */
+    kinfo("ARE active — skipping legacy compositor/input/launcher threads");
 
     kinfo("=== " OS_NAME " — All services started ===");
     kinfo("  Service bus: %u registered services", svcbus_count());
