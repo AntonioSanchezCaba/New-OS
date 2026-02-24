@@ -198,6 +198,8 @@ static void shell_exec(const char* cmd)
         term_puts("  cd path   — change directory\r\n");
         term_puts("  pwd       — print working directory\r\n");
         term_puts("  mkdir dir — create directory\r\n");
+        term_puts("  reboot    — reboot system\r\n");
+        term_puts("  halt      — halt system\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
         for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
         g_term.cx = 0; g_term.cy = 0;
@@ -287,6 +289,16 @@ static void shell_exec(const char* cmd)
             term_puts(newdir);
             term_puts("\r\n");
         }
+    } else if (strcmp(cmd, "reboot") == 0) {
+        term_puts("Rebooting...\r\n");
+        uint8_t good = 0x02;
+        while (good & 0x02) good = inb(0x64);
+        outb(0x64, 0xFE);
+        cpu_halt();
+    } else if (strcmp(cmd, "halt") == 0 || strcmp(cmd, "poweroff") == 0) {
+        term_puts("System halting.\r\n");
+        cpu_cli();
+        cpu_halt();
     } else {
         term_puts("unknown command: ");
         term_puts(cmd);

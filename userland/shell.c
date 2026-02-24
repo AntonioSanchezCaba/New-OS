@@ -70,7 +70,7 @@ static void cmd_help(int argc, char** argv)
         "  uptime            - Show system uptime\n"
         "  mem               - Show memory usage\n"
         "  halt              - Halt the system\n"
-        "  reboot            - Reboot (not implemented)\n"
+        "  reboot            - Reboot the system\n"
     );
 }
 
