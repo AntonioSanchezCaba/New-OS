@@ -80,6 +80,28 @@ typedef struct {
 
 static sm_state_t g_sm;
 
+/* Persistent pointers to the UI scene-graph nodes built each frame */
+static ui_node_t* g_action_root = NULL;
+static uint32_t   g_kill_pid    = 0;
+
+/* =========================================================
+ * Kill button callback — invoked by ui_node_event()
+ * ========================================================= */
+static bool sm_kill_cb(ui_node_t* node, const input_event_t* ev)
+{
+    (void)node;
+    if (ev->type != INPUT_POINTER) return false;
+    /* Rising edge: button pressed this event but not last */
+    bool clicked = (ev->pointer.buttons & IBTN_LEFT) &&
+                   !(ev->pointer.prev_buttons & IBTN_LEFT);
+    if (clicked && g_kill_pid > 0 && g_kill_pid != 1) {
+        process_kill((pid_t)g_kill_pid, SIGKILL);
+        g_sm.selected_proc = -1;
+        g_kill_pid = 0;
+    }
+    return clicked;
+}
+
 /* =========================================================
  * Data collection (uses scheduler/kernel internals)
  * ========================================================= */
@@ -275,6 +297,41 @@ static void sm_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
         draw_string(&c, SM_PAD + 28*FONT_W, ry+2, mem_s, SM_DIM_FG, ACOLOR(0,0,0,0));
     }
 
+    /* ---- Action panel (aether/ui.c scene-graph) ---- *
+     * Rebuilt from scratch each frame via the pool API.  *
+     * Persists in g_action_root for use by sm_input().   */
+    ui_pool_reset();
+    g_action_root = NULL;
+    if (g_sm.selected_proc >= 0 && g_sm.selected_proc < g_sm.proc_count) {
+        int ap_w = (int)w - 2 * SM_PAD;
+        int ap_h = 50;
+        int ap_x = SM_PAD;
+        int ap_y = (int)h - ap_h - SM_PAD;
+
+        g_kill_pid = g_sm.procs[g_sm.selected_proc].pid;
+
+        ui_node_t* card = ui_card(ap_x, ap_y, ap_w, ap_h,
+                                   ACOLOR(0x14, 0x1C, 0x30, 0xFF));
+        if (card) {
+            char lbuf[64];
+            snprintf(lbuf, sizeof(lbuf), "%s  (PID %u)",
+                     g_sm.procs[g_sm.selected_proc].name, g_kill_pid);
+
+            ui_node_t* lbl = ui_label(SM_PAD, (ap_h - FONT_H) / 2,
+                                       ap_w - 120, FONT_H + 4, lbuf,
+                                       SM_TEXT_FG, UI_ALIGN_LEFT);
+            ui_node_t* btn = ui_button(ap_w - 108, (ap_h - 28) / 2, 96, 28,
+                                        "Kill Process", sm_kill_cb, NULL);
+            if (btn)
+                btn->bg = ACOLOR(0x80, 0x20, 0x20, 0xFF);
+            if (lbl) ui_node_add_child(card, lbl);
+            if (btn) ui_node_add_child(card, btn);
+            g_action_root = card;
+        }
+    }
+    if (g_action_root)
+        ui_node_render(g_action_root, &c, 0, 0);
+
     /* Always stay dirty — sysmon re-renders every tick */
     surface_invalidate(id);
 }
@@ -290,6 +347,36 @@ static void sm_input(sid_t id, const input_event_t* ev, void* ud)
             g_sm.scroll_y += ev->pointer.scroll * SM_ROW_H;
             if (g_sm.scroll_y < 0) g_sm.scroll_y = 0;
             surface_invalidate(id);
+        }
+
+        /* Deliver pointer events to the ui.c action panel widget tree */
+        if (g_action_root) {
+            ui_node_event(g_action_root, ev, 0, 0);
+            surface_invalidate(id);
+        }
+
+        /* Click-to-select: left-button press on a process row selects it.
+         * list_top mirrors the fixed y calculation in sm_render(). */
+        bool click = (ev->pointer.buttons & IBTN_LEFT) &&
+                     !(ev->pointer.prev_buttons & IBTN_LEFT);
+        if (click) {
+            int list_top = SM_TITLE_H + SM_PAD
+                         + SM_SECTION_H + 4 + SM_GRAPH_H + SM_PAD  /* CPU */
+                         + SM_SECTION_H + 4 + SM_GRAPH_H + SM_PAD  /* MEM */
+                         + SM_SECTION_H                             /* Processes hdr */
+                         + SM_ROW_H + 2;                            /* Column hdr */
+            int mx = ev->pointer.x;
+            int my = ev->pointer.y;
+            for (int i = 0; i < g_sm.proc_count; i++) {
+                int ry = list_top + i * SM_ROW_H - g_sm.scroll_y;
+                if (my >= ry && my < ry + SM_ROW_H &&
+                    mx >= SM_PAD && mx < (int)g_sm.surf_w - SM_PAD)
+                {
+                    g_sm.selected_proc = i;
+                    surface_invalidate(id);
+                    break;
+                }
+            }
         }
     }
     if (ev->type == INPUT_KEY && ev->key.down) {
