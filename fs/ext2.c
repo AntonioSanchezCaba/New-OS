@@ -14,12 +14,48 @@
  */
 #include <fs/ext2.h>
 #include <fs/vfs.h>
+#include <fs/blockcache.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
 
 /* Maximum symlink depth to follow */
 #define EXT2_SYMLINK_DEPTH 4
+
+/* =========================================================
+ * Write-back registry — track all mounted ext2 filesystems
+ * ========================================================= */
+#define EXT2_MAX_MOUNTED 8
+static ext2_fs_t* g_mounted[EXT2_MAX_MOUNTED];
+static int        g_mounted_count = 0;
+
+static void ext2_register(ext2_fs_t* fs)
+{
+    if (g_mounted_count < EXT2_MAX_MOUNTED)
+        g_mounted[g_mounted_count++] = fs;
+}
+
+/* Write the entire in-memory image back to the backing ATA partition */
+static void ext2_flush(ext2_fs_t* fs)
+{
+    if (!fs->dirty || fs->backing_drive < 0) return;
+    kinfo("ext2: flushing %llu kB image to drive %d lba %llu ...",
+          fs->size / 1024, fs->backing_drive, fs->backing_lba);
+
+    uint64_t sectors = (fs->size + 511) / 512;
+    for (uint64_t i = 0; i < sectors; i++) {
+        bcache_write_through(fs->backing_drive, fs->backing_lba + i,
+                             fs->data + i * 512);
+    }
+    fs->dirty = false;
+    kinfo("ext2: flush complete");
+}
+
+void ext2_flush_all(void)
+{
+    for (int i = 0; i < g_mounted_count; i++)
+        ext2_flush(g_mounted[i]);
+}
 
 /* =========================================================
  * Internal helpers
@@ -171,6 +207,7 @@ static uint32_t ext2_alloc_block(ext2_fs_t* fs)
                 uint32_t blk = fs->first_data_block + g * bpg + i;
                 uint8_t* bp = block_ptr(fs, blk);
                 if (bp) memset(bp, 0, fs->block_size);
+                fs->dirty = true;
                 return blk;
             }
         }
@@ -200,6 +237,7 @@ static uint32_t ext2_alloc_inode(ext2_fs_t* fs)
                 if (sb->s_free_inodes_count > 0)
                     sb->s_free_inodes_count--;
                 fs->sb.s_free_inodes_count = sb->s_free_inodes_count;
+                fs->dirty = true;
                 return g * fs->inodes_per_group + i + 1;
             }
         }
@@ -798,6 +836,9 @@ vfs_node_t* ext2_mount(uint8_t* data, uint64_t size)
 
     fs->data             = data;
     fs->size             = size;
+    fs->backing_drive    = -1;   /* no backing until ext2_init sets it */
+    fs->backing_lba      = 0;
+    fs->dirty            = false;
     fs->block_size       = 1024u << sb->s_log_block_size;
     fs->inodes_per_group = sb->s_inodes_per_group;
     fs->inode_size       = (sb->s_rev_level >= 1) ? sb->s_inode_size : 128;
@@ -823,10 +864,19 @@ vfs_node_t* ext2_mount(uint8_t* data, uint64_t size)
     return root;
 }
 
-int ext2_init(uint8_t* data, uint64_t size, const char* mount_point)
+int ext2_init(uint8_t* data, uint64_t size, const char* mount_point,
+              int drive_idx, uint64_t lba_start)
 {
     vfs_node_t* root = ext2_mount(data, size);
     if (!root) return -1;
+
+    /* Store backing-device info in fs for write-back */
+    ext2_fs_t* fs = (ext2_fs_t*)root->impl;
+    if (fs && drive_idx >= 0) {
+        fs->backing_drive = drive_idx;
+        fs->backing_lba   = lba_start;
+    }
+    ext2_register(fs);
 
     int result = vfs_mount(mount_point, root, NULL);
     if (result != 0) {
@@ -834,6 +884,7 @@ int ext2_init(uint8_t* data, uint64_t size, const char* mount_point)
         kfree(root);
         return -1;
     }
-    klog_info("ext2: mounted at %s", mount_point);
+    klog_info("ext2: mounted at %s (drive=%d lba=%llu)",
+              mount_point, drive_idx, lba_start);
     return 0;
 }

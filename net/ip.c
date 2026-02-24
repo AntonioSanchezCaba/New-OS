@@ -4,6 +4,7 @@
 #include <net/ip.h>
 #include <net/ethernet.h>
 #include <net/net.h>
+#include <net/tcp.h>
 #include <kernel.h>
 #include <string.h>
 #include <memory.h>
@@ -252,6 +253,12 @@ void ip4_receive(const void* pkt, size_t len)
     switch (ip->protocol) {
     case PROTO_ICMP:
         icmp_receive(ip, payload, payload_len);
+        break;
+    case PROTO_TCP:
+        tcp_receive(ip, payload, payload_len);
+        break;
+    case PROTO_UDP:
+        udp_receive(ip, payload, payload_len);
         break;
     default:
         /* Unknown protocol - drop */

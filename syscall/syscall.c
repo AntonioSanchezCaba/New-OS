@@ -36,6 +36,42 @@
 static syscall_fn_t syscall_table[MAX_SYSCALLS];
 
 /* ============================================================
+ * POSIX permission check helper
+ *
+ * Returns 0 if access allowed, -EACCES if denied.
+ * access_mask: combination of VFS_ACCESS_R (4), VFS_ACCESS_W (2), VFS_ACCESS_X (1)
+ * ============================================================ */
+#define VFS_ACCESS_R 4
+#define VFS_ACCESS_W 2
+#define VFS_ACCESS_X 1
+
+static int vfs_check_access(const vfs_node_t* node, int access_mask)
+{
+    /* root bypasses all permission checks */
+    if (!current_process || current_process->euid == 0)
+        return 0;
+
+    /* Nodes with mode==0 are uninitialized (ramfs/kernel nodes) — allow */
+    if (node->mode == 0)
+        return 0;
+
+    uint32_t mode = node->mode & 0777;
+    int effective_bits;
+
+    if (current_process->euid == node->uid) {
+        effective_bits = (int)((mode >> 6) & 7);  /* owner bits */
+    } else if (current_process->egid == node->gid) {
+        effective_bits = (int)((mode >> 3) & 7);  /* group bits */
+    } else {
+        effective_bits = (int)(mode & 7);          /* others bits */
+    }
+
+    if ((effective_bits & access_mask) != access_mask)
+        return -EACCES;
+    return 0;
+}
+
+/* ============================================================
  * sys_write - write bytes to a file descriptor
  * fd=1 (stdout) and fd=2 (stderr) go to VGA.
  * ============================================================ */
@@ -116,6 +152,17 @@ int64_t sys_open(uint64_t path_addr, uint64_t flags, uint64_t mode,
 
     vfs_node_t* node = vfs_open(path, (int)flags);
     if (!node) return -ENOENT;
+
+    /* Permission check: determine required access from flags */
+    {
+        int need = 0;
+        int acc = (int)(flags & 3);          /* low 2 bits = access mode */
+        if (acc == O_RDONLY || acc == O_RDWR) need |= VFS_ACCESS_R;
+        if (acc == O_WRONLY || acc == O_RDWR) need |= VFS_ACCESS_W;
+        if (flags & O_CREAT)                  need |= VFS_ACCESS_W;
+        int perr = vfs_check_access(node, need);
+        if (perr != 0) { vfs_close(node); return perr; }
+    }
 
     int fd = fd_alloc(current_process);
     if (fd < 0) {

@@ -142,6 +142,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
             mouse_init();
             kinfo("Initializing software cursor...");
             cursor_init();
+            cursor_show();   /* make cursor visible from first frame */
             kinfo("Initializing wallpaper engine...");
             wallpaper_init();
             kinfo("Initializing window animations...");

@@ -146,14 +146,18 @@ typedef struct {
 
 /* ---- Driver state ---- */
 typedef struct {
-    uint8_t*          data;       /* Pointer to raw image in memory */
-    uint64_t          size;       /* Size of image in bytes */
+    uint8_t*          data;           /* Pointer to raw image in memory     */
+    uint64_t          size;           /* Size of image in bytes              */
     uint32_t          block_size;
     uint32_t          inodes_per_group;
     uint32_t          inode_size;
     uint32_t          first_data_block;
     uint32_t          group_count;
     ext2_superblock_t sb;
+    /* Backing-device info for write-back persistence */
+    int               backing_drive;  /* ATA drive index, -1 = no backing   */
+    uint64_t          backing_lba;    /* First sector of this partition      */
+    bool              dirty;          /* True if image modified since load   */
 } ext2_fs_t;
 
 /* ---- API ---- */
@@ -168,8 +172,17 @@ vfs_node_t* ext2_mount(uint8_t* data, uint64_t size);
 
 /*
  * Register the EXT2 volume and mount it at a given VFS path.
+ * drive_idx / lba_start identify the backing ATA partition for write-back
+ * (-1 / 0 means no backing device, changes are RAM-only).
  * Returns 0 on success.
  */
-int ext2_init(uint8_t* data, uint64_t size, const char* mount_point);
+int ext2_init(uint8_t* data, uint64_t size, const char* mount_point,
+              int drive_idx, uint64_t lba_start);
+
+/*
+ * Write back any dirty ext2 images to their backing ATA devices.
+ * Called by diskman_shutdown() before power-off.
+ */
+void ext2_flush_all(void);
 
 #endif /* FS_EXT2_H */

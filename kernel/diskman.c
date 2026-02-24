@@ -126,7 +126,7 @@ static bool try_mount_ext2(int drive_idx, uint64_t lba_start, uint64_t lba_size,
             memset(image + i * BCACHE_SECTOR_SIZE, 0,   BCACHE_SECTOR_SIZE);
     }
 
-    int rc = ext2_init(image, image_bytes, mount_point);
+    int rc = ext2_init(image, image_bytes, mount_point, drive_idx, lba_start);
     if (rc != 0) {
         kfree(image);
         kwarn("DISKMAN: ext2_init failed at %s (rc=%d)", mount_point, rc);
@@ -210,6 +210,8 @@ const disk_partition_t* diskman_get(int idx)
 
 void diskman_shutdown(void)
 {
+    /* Write back any dirty ext2 images before flushing the block cache */
+    ext2_flush_all();
     bcache_flush_all();
     kinfo("DISKMAN: all caches flushed");
 }
