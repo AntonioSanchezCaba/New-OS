@@ -12,6 +12,7 @@
 #include <kernel/diskman.h>
 #include <fs/blockcache.h>
 #include <fs/fat32.h>
+#include <fs/ext2.h>
 #include <fs/vfs.h>
 #include <drivers/ata.h>
 #include <memory.h>
@@ -51,7 +52,7 @@ static void build_mount(char* out, int drive, int part)
 }
 
 /* =========================================================
- * Try to mount a partition
+ * Try to mount a FAT32 partition
  * ========================================================= */
 static bool try_mount_fat32(int drive_idx, uint64_t lba_start,
                              const char* mount_point)
@@ -65,6 +66,76 @@ static bool try_mount_fat32(int drive_idx, uint64_t lba_start,
         return true;
     }
     return false;
+}
+
+/* =========================================================
+ * Try to mount an EXT2 partition
+ *
+ * The ext2 driver works with a memory-mapped image, so we copy the
+ * partition into a heap buffer (up to EXT2_MAX_SECTORS = 32 MB).
+ * The buffer is kept alive indefinitely — the driver reads from it.
+ * ========================================================= */
+#define EXT2_MAX_SECTORS  65536ULL   /* 32 MB @ 512 B/sector */
+
+static bool try_mount_ext2(int drive_idx, uint64_t lba_start, uint64_t lba_size,
+                            const char* mount_point)
+{
+    vfs_mkdir("/mnt");
+
+    /*
+     * Quick-validate ext2 magic in the superblock (byte offset 1024,
+     * field s_magic at offset +56 within the superblock = byte 1080).
+     * Sector 2 (lba_start + 2) starts at byte 1024 when sector size is 512.
+     */
+    uint64_t sb_lba = lba_start + (1024 / BCACHE_SECTOR_SIZE);
+    uint8_t* sb_sec = bcache_get(drive_idx, sb_lba);
+    if (!sb_sec) return false;
+
+    uint16_t magic;
+    /* s_magic is at byte offset 56 within the superblock; superblock starts
+     * at byte 1024; 1024 % 512 = 0, so we're at the start of sector sb_lba.
+     * s_magic offset within this sector: (1024 % 512) + 56 = 56. */
+    memcpy(&magic, sb_sec + (1024 % BCACHE_SECTOR_SIZE) + 56, sizeof(magic));
+    if (magic != 0xEF53) {
+        kdebug("DISKMAN: drive %d lba %llu not ext2 (magic=0x%04X)",
+               drive_idx, lba_start, magic);
+        return false;
+    }
+
+    /* Clamp to 32 MB */
+    if (lba_size > EXT2_MAX_SECTORS) {
+        kwarn("DISKMAN: ext2 at %s is %llu sectors, clamping to %llu (32 MB)",
+              mount_point, lba_size, EXT2_MAX_SECTORS);
+        lba_size = EXT2_MAX_SECTORS;
+    }
+
+    uint64_t image_bytes = lba_size * BCACHE_SECTOR_SIZE;
+    uint8_t* image = (uint8_t*)kmalloc((size_t)image_bytes);
+    if (!image) {
+        kerror("DISKMAN: out of memory for ext2 image (%llu kB)",
+               image_bytes / 1024);
+        return false;
+    }
+
+    /* Copy partition sectors into image buffer */
+    for (uint64_t i = 0; i < lba_size; i++) {
+        uint8_t* sec = bcache_get(drive_idx, lba_start + i);
+        if (sec)
+            memcpy(image + i * BCACHE_SECTOR_SIZE, sec, BCACHE_SECTOR_SIZE);
+        else
+            memset(image + i * BCACHE_SECTOR_SIZE, 0,   BCACHE_SECTOR_SIZE);
+    }
+
+    int rc = ext2_init(image, image_bytes, mount_point);
+    if (rc != 0) {
+        kfree(image);
+        kwarn("DISKMAN: ext2_init failed at %s (rc=%d)", mount_point, rc);
+        return false;
+    }
+
+    kinfo("DISKMAN: ext2 mounted %s (%llu kB image)", mount_point, image_bytes / 1024);
+    /* image intentionally kept alive — ext2 driver reads from it */
+    return true;
 }
 
 /* =========================================================
@@ -108,9 +179,11 @@ static void scan_drive(int drive_idx)
         if (p->type == 0x0B || p->type == 0x0C) {
             dp->mounted = try_mount_fat32(drive_idx, p->lba_start, dp->mount);
         } else if (p->type == 0x83) {
-            /* ext2 mount — attempt via generic VFS */
-            kinfo("DISKMAN: ext2 partition found at %s (not yet auto-mounted)",
-                  dp->mount);
+            dp->mounted = try_mount_ext2(drive_idx, p->lba_start,
+                                         p->lba_size, dp->mount);
+            if (!dp->mounted)
+                kinfo("DISKMAN: ext2 at %s skipped (not ext2 or too large)",
+                      dp->mount);
         }
     }
 }

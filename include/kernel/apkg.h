@@ -25,8 +25,10 @@
 #define APKG_AUTHOR_LEN  32
 #define APKG_MAX_DEPS    8
 #define APKG_DEP_LEN     48
+#define APKG_PATH_LEN    256
 
-#define APKG_DB_MAX      64   /* Max installed packages tracked */
+#define APKG_DB_MAX      64    /* Max installed packages tracked   */
+#define APKG_CATALOG_MAX 128   /* Max packages in repo catalog     */
 
 /* ---- On-disk header (256 bytes) ---- */
 typedef struct __attribute__((packed)) {
@@ -59,14 +61,29 @@ typedef struct {
     bool     installed;
 } apkg_record_t;
 
-/* ---- API ---- */
+/*
+ * ---- Package catalog entry (available-but-not-yet-installed) ----
+ *
+ * Populated by apkg_repo_scan(); represents a package found in a local
+ * repository directory (e.g. /sys/packages/cache/).
+ */
+typedef struct {
+    char     name[APKG_NAME_LEN];
+    char     version[APKG_VER_LEN];
+    char     description[APKG_DESC_LEN];
+    char     author[APKG_AUTHOR_LEN];
+    char     path[APKG_PATH_LEN];   /* VFS path to the .apkg file */
+    bool     available;
+} apkg_catalog_t;
 
-/* Initialize package subsystem (loads DB from VFS if present) */
+/* ---- Installed package API ---- */
+
+/* Initialize package subsystem (loads DB + scans default repo) */
 void apkg_init(void);
 
 /* Validate and install a package from a byte buffer.
  * Returns 0 on success, negative on error:
- *   -1 = bad magic/version
+ *   -1 = bad magic/version/truncated
  *   -2 = CRC32 mismatch
  *   -3 = dependency not satisfied
  *   -4 = DB full
@@ -89,5 +106,30 @@ const apkg_record_t* apkg_get(int idx);
 void apkg_save(void);
 void apkg_load(void);
 
-/* CRC32 helper (also used by legacy pkg.c) */
+/* ---- Repository / catalog API ---- */
+
+/*
+ * apkg_repo_scan - scan a VFS directory for .apkg files.
+ * Reads each file's header to extract metadata and appends entries to
+ * the in-memory catalog.  Safe to call multiple times with different dirs.
+ * Returns the number of new catalog entries added.
+ *
+ * Default directory scanned at apkg_init() time: /sys/packages/cache
+ */
+int  apkg_repo_scan(const char* dir_path);
+
+/*
+ * apkg_repo_install_by_name - load an .apkg from the catalog and install it.
+ * Reads the file into a heap buffer, calls apkg_install(), frees the buffer.
+ * Returns 0 on success, negative on error (same codes as apkg_install()).
+ */
+int  apkg_repo_install_by_name(const char* name);
+
+/* Number of packages in the catalog */
+int  apkg_catalog_count(void);
+
+/* Iterate catalog entries (idx 0 .. apkg_catalog_count()-1) */
+const apkg_catalog_t* apkg_catalog_get(int idx);
+
+/* CRC32 helper */
 uint32_t apkg_crc32(const void* data, size_t len);

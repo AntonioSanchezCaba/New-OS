@@ -49,15 +49,174 @@ static apkg_record_t g_db[APKG_DB_MAX];
 static int           g_db_count = 0;
 static bool          g_initialized = false;
 
+/* Package catalog (available but not yet installed) */
+static apkg_catalog_t g_catalog[APKG_CATALOG_MAX];
+static int            g_catalog_count = 0;
+
 #define APKG_DB_VFS_PATH  "/sys/pkg/db"
 
 void apkg_init(void)
 {
-    memset(g_db, 0, sizeof(g_db));
-    g_db_count   = 0;
-    g_initialized = true;
+    memset(g_db,      0, sizeof(g_db));
+    memset(g_catalog, 0, sizeof(g_catalog));
+    g_db_count      = 0;
+    g_catalog_count = 0;
+    g_initialized   = true;
     apkg_load();
-    kinfo("APKG: initialized (%d packages installed)", g_db_count);
+    apkg_repo_scan("/sys/packages/cache");
+    kinfo("APKG: initialized — %d installed, %d available",
+          g_db_count, g_catalog_count);
+}
+
+/* =========================================================
+ * Repository / catalog
+ * ========================================================= */
+
+/*
+ * apkg_repo_scan — walk a VFS directory for .apkg files.
+ * Reads each file's 256-byte header to extract metadata and
+ * appends new entries to g_catalog[].  Safe to call multiple
+ * times with different directories.
+ * Returns the number of new catalog entries added.
+ */
+int apkg_repo_scan(const char* dir_path)
+{
+    if (!dir_path) return 0;
+
+    vfs_node_t* dir = vfs_open(dir_path, VFS_O_READ);
+    if (!dir) return 0;
+
+    int added = 0;
+    uint32_t idx = 0;
+    vfs_dirent_t* de;
+
+    while ((de = vfs_readdir(dir, idx++)) != NULL) {
+        /* Only process names ending in ".apkg" */
+        size_t nlen = strlen(de->name);
+        if (nlen < 6 ||
+            strcmp(de->name + nlen - 5, ".apkg") != 0)
+            continue;
+
+        if (g_catalog_count >= APKG_CATALOG_MAX)
+            break;
+
+        /* Build full path */
+        char fpath[APKG_PATH_LEN];
+        size_t dlen = strlen(dir_path);
+        if (dlen + 1 + nlen + 1 > APKG_PATH_LEN)
+            continue;
+        memcpy(fpath, dir_path, dlen);
+        fpath[dlen] = '/';
+        memcpy(fpath + dlen + 1, de->name, nlen + 1);
+
+        /* Open and read the 256-byte header */
+        vfs_node_t* fnode = vfs_open(fpath, VFS_O_READ);
+        if (!fnode) continue;
+
+        apkg_header_t hdr;
+        ssize_t nr = vfs_read(fnode, 0, sizeof(hdr), &hdr);
+        vfs_close(fnode);
+
+        if (nr < (ssize_t)sizeof(hdr)) continue;
+        if (memcmp(hdr.magic, APKG_MAGIC, APKG_MAGIC_LEN) != 0) continue;
+        if (hdr.fmt_version != APKG_FMT_VERSION) continue;
+
+        /* Skip if already in catalog (same name) */
+        bool dup = false;
+        for (int c = 0; c < g_catalog_count; c++) {
+            if (strncmp(g_catalog[c].name, hdr.name, APKG_NAME_LEN) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+
+        apkg_catalog_t* ce = &g_catalog[g_catalog_count++];
+        memset(ce, 0, sizeof(*ce));
+        strncpy(ce->name,        hdr.name,        APKG_NAME_LEN  - 1);
+        strncpy(ce->version,     hdr.version,     APKG_VER_LEN   - 1);
+        strncpy(ce->description, hdr.description, APKG_DESC_LEN  - 1);
+        strncpy(ce->author,      hdr.author,      APKG_AUTHOR_LEN - 1);
+        strncpy(ce->path,        fpath,           APKG_PATH_LEN  - 1);
+        ce->available = true;
+        added++;
+    }
+
+    vfs_close(dir);
+    if (added > 0)
+        kinfo("APKG: repo scan '%s' — %d new package(s)", dir_path, added);
+    return added;
+}
+
+/*
+ * apkg_repo_install_by_name — find a package in the catalog,
+ * load its .apkg file into a heap buffer, and call apkg_install().
+ * Returns 0 on success, negative on error (same codes as apkg_install()).
+ */
+int apkg_repo_install_by_name(const char* name)
+{
+    if (!name) return -1;
+
+    /* Find in catalog */
+    apkg_catalog_t* ce = NULL;
+    for (int i = 0; i < g_catalog_count; i++) {
+        if (strncmp(g_catalog[i].name, name, APKG_NAME_LEN) == 0 &&
+            g_catalog[i].available) {
+            ce = &g_catalog[i];
+            break;
+        }
+    }
+    if (!ce) {
+        klog_warn("APKG: '%s' not found in catalog", name);
+        return -1;
+    }
+
+    /* Open the .apkg file */
+    vfs_node_t* node = vfs_open(ce->path, VFS_O_READ);
+    if (!node) {
+        klog_warn("APKG: cannot open '%s'", ce->path);
+        return -1;
+    }
+
+    /* Determine file size by reading in chunks */
+    size_t file_size = 0;
+    {
+        char probe[512];
+        ssize_t r;
+        while ((r = vfs_read(node, (off_t)file_size, sizeof(probe), probe)) > 0)
+            file_size += (size_t)r;
+    }
+
+    if (file_size < sizeof(apkg_header_t)) {
+        vfs_close(node);
+        return -1;
+    }
+
+    uint8_t* buf = (uint8_t*)kmalloc(file_size);
+    if (!buf) {
+        vfs_close(node);
+        return -1;
+    }
+
+    ssize_t nr = vfs_read(node, 0, file_size, buf);
+    vfs_close(node);
+
+    if (nr < (ssize_t)file_size) {
+        kfree(buf);
+        return -1;
+    }
+
+    int rc = apkg_install(buf, file_size);
+    kfree(buf);
+    return rc;
+}
+
+int apkg_catalog_count(void) { return g_catalog_count; }
+
+const apkg_catalog_t* apkg_catalog_get(int idx)
+{
+    if (idx < 0 || idx >= g_catalog_count) return NULL;
+    return &g_catalog[idx];
 }
 
 /* =========================================================
