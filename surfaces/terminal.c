@@ -242,6 +242,9 @@ static void shell_exec(const char* cmd)
         term_puts("  ps        — list running processes\r\n");
         term_puts("  kill pid  — send SIGKILL to process\r\n");
         term_puts("  whoami    — print current user\r\n");
+        term_puts("  mv src dst — move/rename a file\r\n");
+        term_puts("  chmod oct path — change file mode\r\n");
+        term_puts("  date      — show uptime clock\r\n");
         term_puts("  logout    — end session\r\n");
         term_puts("  ifconfig  — show network interface\r\n");
         term_puts("  ping host — ICMP ping a host/IP\r\n");
@@ -528,6 +531,58 @@ static void shell_exec(const char* cmd)
             snprintf(rb, sizeof(rb), "run: '%s' launched as pid %d\r\n",
                      pkg, (int)rpid);
             term_puts(rb);
+        }
+    } else if (strncmp(cmd, "mv ", 3) == 0) {
+        /* mv <src> <dst> — copy then unlink source */
+        const char* sp = cmd + 3;
+        const char* ep = sp;
+        while (*ep && *ep != ' ') ep++;
+        if (!*ep) {
+            term_puts("usage: mv <src> <dst>\r\n");
+        } else {
+            char src[VFS_NAME_MAX+1], dst[VFS_NAME_MAX+1];
+            int sl = (int)(ep - sp); if (sl >= VFS_NAME_MAX) sl = VFS_NAME_MAX-1;
+            memcpy(src, sp, (size_t)sl); src[sl] = '\0';
+            term_make_path(src, src, sizeof(src));
+            term_make_path(ep + 1, dst, sizeof(dst));
+            vfs_node_t* sf = vfs_resolve_path(src);
+            if (!sf || (sf->flags & VFS_DIRECTORY)) {
+                term_puts("mv: source not found or is directory\r\n");
+            } else {
+                vfs_node_t* df = vfs_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
+                if (!df) { term_puts("mv: cannot create destination\r\n"); }
+                else {
+                    char mvbuf[512]; off_t off = 0; ssize_t n;
+                    while ((n = vfs_read(sf, off, sizeof(mvbuf), mvbuf)) > 0) {
+                        vfs_write(df, off, (size_t)n, mvbuf); off += n;
+                    }
+                    vfs_close(df);
+                    vfs_unlink(src);
+                    term_puts("mv: done\r\n");
+                }
+            }
+        }
+    } else if (strcmp(cmd, "date") == 0) {
+        /* Show uptime as a stand-in for wall-clock time */
+        uint32_t t = timer_get_ticks();
+        uint32_t ss = t / 1000, mm = ss / 60, hh = mm / 60;
+        ss %= 60; mm %= 60; hh %= 24;
+        char dbuf[48];
+        snprintf(dbuf, sizeof(dbuf), "Uptime: %02u:%02u:%02u\r\n", hh, mm, ss);
+        term_puts(dbuf);
+    } else if (strncmp(cmd, "chmod ", 6) == 0) {
+        /* chmod <octal> <path> */
+        const char* sp = cmd + 6;
+        uint32_t mode = 0;
+        while (*sp >= '0' && *sp <= '7') mode = mode * 8 + (uint32_t)(*sp++ - '0');
+        while (*sp == ' ') sp++;
+        if (!*sp) { term_puts("usage: chmod <octal> <path>\r\n"); }
+        else {
+            char cpath[VFS_NAME_MAX+1];
+            term_make_path(sp, cpath, sizeof(cpath));
+            vfs_node_t* cn = vfs_resolve_path(cpath);
+            if (!cn) { term_puts("chmod: not found\r\n"); }
+            else { cn->mode = (uint16_t)mode & 0777; term_puts("chmod: done\r\n"); }
         }
     } else if (strcmp(cmd, "reboot") == 0) {
         term_puts("Rebooting...\r\n");

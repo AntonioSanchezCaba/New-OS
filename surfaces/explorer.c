@@ -101,6 +101,50 @@ static void ex_list_dir(void)
 }
 
 /* =========================================================
+ * File-write operations
+ * ========================================================= */
+
+/* Build the absolute path of the currently-selected item. */
+static void ex_selected_path(char* out, int out_len)
+{
+    if (g_ex.selected < 0 || g_ex.selected >= g_ex.item_count) {
+        out[0] = '\0'; return;
+    }
+    if (strcmp(g_ex.cwd, "/") == 0)
+        snprintf(out, out_len, "/%s", g_ex.items[g_ex.selected].name);
+    else
+        snprintf(out, out_len, "%s/%s", g_ex.cwd, g_ex.items[g_ex.selected].name);
+}
+
+/* Delete selected file or directory. */
+static void ex_delete_selected(sid_t id)
+{
+    if (g_ex.selected < 0) return;
+    char path[VFS_PATH_MAX];
+    ex_selected_path(path, sizeof(path));
+    if (!path[0]) return;
+    vfs_unlink(path);
+    ex_list_dir();
+    if (g_ex.item_count == 0)         g_ex.selected = -1;
+    else if (g_ex.selected >= g_ex.item_count) g_ex.selected = g_ex.item_count - 1;
+    surface_invalidate(id);
+}
+
+/* Create a new folder in the current directory. */
+static void ex_new_folder(sid_t id)
+{
+    char path[VFS_PATH_MAX];
+    for (int n = 0; n < 32; n++) {
+        if (strcmp(g_ex.cwd, "/") == 0)
+            snprintf(path, VFS_PATH_MAX, n == 0 ? "/NewFolder" : "/NewFolder%d", n + 1);
+        else
+            snprintf(path, VFS_PATH_MAX, n == 0 ? "%s/NewFolder" : "%s/NewFolder%d",
+                     g_ex.cwd, n + 1);
+        if (vfs_mkdir(path) == 0) { ex_list_dir(); surface_invalidate(id); return; }
+    }
+}
+
+/* =========================================================
  * Card geometry
  * ========================================================= */
 static void card_rect(int idx, int* ox, int* oy, int surf_w, int content_y)
@@ -154,6 +198,21 @@ static void ex_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
     /* Path */
     draw_string(&c, EX_PAD + 52, tb_y + (EX_TOOLBAR_H - FONT_H) / 2,
                 g_ex.cwd, EX_PATH_FG, ACOLOR(0,0,0,0));
+
+    /* Right-side action buttons: [+] new folder,  [Del] delete */
+    int btn_h  = EX_TOOLBAR_H - 12;
+    int btn_y2 = tb_y + 6;
+    int del_bx = (int)w - EX_PAD - 48;
+    int new_bx = del_bx - 8 - 48;
+    acolor_t del_col = (g_ex.selected >= 0)
+                     ? ACOLOR(0xA0, 0x20, 0x20, 0xFF)
+                     : ACOLOR(0x40, 0x28, 0x28, 0xFF);
+    draw_rect(&c, del_bx, btn_y2, 48, btn_h, del_col);
+    draw_string(&c, del_bx + (48 - 3*(int)FONT_W)/2, btn_y2 + (btn_h - FONT_H)/2,
+                "Del", EX_TEXT_FG, ACOLOR(0,0,0,0));
+    draw_rect(&c, new_bx, btn_y2, 48, btn_h, ACOLOR(0x20, 0x50, 0x20, 0xFF));
+    draw_string(&c, new_bx + (48 - (int)FONT_W)/2, btn_y2 + (btn_h - FONT_H)/2,
+                "+", ACOLOR(0x80, 0xFF, 0x80, 0xFF), ACOLOR(0,0,0,0));
 
     /* Divider */
     int content_y = EX_TITLE_H + EX_TOOLBAR_H;
@@ -228,6 +287,16 @@ static void ex_input(sid_t id, const input_event_t* ev, void* ud)
         int mx = ev->pointer.x;
         int my = ev->pointer.y;
 
+        /* Toolbar button geometry (mirrors render) */
+        int btn_h2  = EX_TOOLBAR_H - 12;
+        int btn_y2  = EX_TITLE_H + 6;
+        int del_bx  = (int)g_ex.surf_w - EX_PAD - 48;
+        int new_bx  = del_bx - 8 - 48;
+        bool del_hit = (mx >= del_bx && mx < del_bx + 48 &&
+                        my >= btn_y2  && my < btn_y2 + btn_h2);
+        bool new_hit = (mx >= new_bx && mx < new_bx + 48 &&
+                        my >= btn_y2  && my < btn_y2 + btn_h2);
+
         /* Back button hit */
         bool back_hit = (mx >= EX_PAD && mx < EX_PAD + 40 &&
                          my >= EX_TITLE_H + 6 && my < EX_TITLE_H + EX_TOOLBAR_H - 6);
@@ -245,7 +314,11 @@ static void ex_input(sid_t id, const input_event_t* ev, void* ud)
         bool click = (ev->pointer.buttons & IBTN_LEFT) &&
                      !(ev->pointer.prev_buttons & IBTN_LEFT);
         if (click) {
-            if (back_hit) {
+            if (del_hit) {
+                ex_delete_selected(id);
+            } else if (new_hit) {
+                ex_new_folder(id);
+            } else if (back_hit) {
                 /* Navigate to parent */
                 char* slash = strrchr(g_ex.cwd, '/');
                 if (slash && slash != g_ex.cwd) {
@@ -306,6 +379,20 @@ static void ex_input(sid_t id, const input_event_t* ev, void* ud)
                 strncpy(g_ex.cwd, next, VFS_PATH_MAX-1);
                 ex_list_dir();
             }
+            break;
+        case KEY_DELETE:
+            ex_delete_selected(id);
+            break;
+        case 'n':
+        case 'N':
+            ex_new_folder(id);
+            break;
+        case KEY_BACKSPACE:
+        {   /* Navigate to parent */
+            char* slash = strrchr(g_ex.cwd, '/');
+            if (slash && slash != g_ex.cwd) { *slash = '\0'; ex_list_dir(); }
+            else { strcpy(g_ex.cwd, "/"); ex_list_dir(); }
+        }
             break;
         }
         surface_invalidate(id);

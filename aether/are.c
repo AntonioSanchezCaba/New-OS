@@ -28,6 +28,7 @@
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <kernel/version.h>
+#include <gui/theme.h>
 #include <services/login.h>
 #include <memory.h>
 #include <string.h>
@@ -155,6 +156,7 @@ void are_init(void)
     context_init();
     input_init();
     ui_pool_reset();
+    theme_init();   /* ensure colour theme is active in ARE mode */
 
     kinfo("ARE v%d.%d initialized — %ux%u",
           ARE_VERSION_MAJOR, ARE_VERSION_MINOR, g_screen_w, g_screen_h);

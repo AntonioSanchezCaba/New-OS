@@ -144,6 +144,11 @@ void keyboard_irq_handler(void* regs)
             case 0x50: kc = 0x101; break;  /* KEY_DOWN_ARROW  */
             case 0x4B: kc = 0x102; break;  /* KEY_LEFT_ARROW  */
             case 0x4D: kc = 0x103; break;  /* KEY_RIGHT_ARROW */
+            case 0x47: kc = 0x104; break;  /* KEY_HOME        */
+            case 0x4F: kc = 0x105; break;  /* KEY_END         */
+            case 0x49: kc = 0x106; break;  /* KEY_PAGE_UP     */
+            case 0x51: kc = 0x107; break;  /* KEY_PAGE_DOWN   */
+            case 0x53: kc = 0x108; break;  /* KEY_DELETE      */
             case 0x1C: kc = '\n';  break;  /* Numpad Enter    */
             default: break;
         }
@@ -178,6 +183,19 @@ void keyboard_irq_handler(void* regs)
         case KEY_ENTER:    gui_kc = '\n';  gui_ch = '\n'; break;
         case KEY_BACKSPACE:gui_kc = '\b';  gui_ch = '\b'; break;
         case KEY_TAB:      gui_kc = '\t';  gui_ch = '\t'; break;
+        /* F1–F12 (scan codes 0x3B–0x44, 0x57–0x58) */
+        case 0x3B: gui_kc = 0x11B; break; /* F1  */
+        case 0x3C: gui_kc = 0x11C; break; /* F2  */
+        case 0x3D: gui_kc = 0x11D; break; /* F3  */
+        case 0x3E: gui_kc = 0x11E; break; /* F4  */
+        case 0x3F: gui_kc = 0x11F; break; /* F5  */
+        case 0x40: gui_kc = 0x120; break; /* F6  */
+        case 0x41: gui_kc = 0x121; break; /* F7  */
+        case 0x42: gui_kc = 0x122; break; /* F8  */
+        case 0x43: gui_kc = 0x123; break; /* F9  */
+        case 0x44: gui_kc = 0x124; break; /* F10 */
+        case 0x57: gui_kc = 0x125; break; /* F11 */
+        case 0x58: gui_kc = 0x126; break; /* F12 */
         default: break;
     }
 
