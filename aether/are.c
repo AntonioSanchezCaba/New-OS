@@ -42,6 +42,90 @@ static uint32_t g_screen_w = 0;
 static uint32_t g_screen_h = 0;
 static uint32_t g_frame    = 0;
 
+/* =========================================================
+ * Floating window management
+ * ========================================================= */
+#define FLOAT_MAX       8
+#define FLOAT_TITLE_H   26    /* Height of drag-to-move title bar */
+#define FLOAT_BTN_SZ    16    /* Close button size */
+
+static sid_t  g_floats[FLOAT_MAX];
+static int    g_float_count = 0;
+
+/* Drag state */
+static sid_t  g_drag_sid = SID_NONE;
+static vec2_t g_drag_off = { 0, 0 };
+
+static void float_add(sid_t sid)
+{
+    if (g_float_count < FLOAT_MAX)
+        g_floats[g_float_count++] = sid;
+}
+
+static void float_remove(sid_t sid)
+{
+    for (int i = 0; i < g_float_count; i++) {
+        if (g_floats[i] == sid) {
+            for (int j = i; j < g_float_count - 1; j++)
+                g_floats[j] = g_floats[j + 1];
+            g_float_count--;
+            if (g_drag_sid == sid) g_drag_sid = SID_NONE;
+            return;
+        }
+    }
+}
+
+/* Draw all floating windows over the composed back-buffer */
+static void are_compose_floats(canvas_t* c)
+{
+    for (int fi = 0; fi < g_float_count; fi++) {
+        surface_t* f = surface_get(g_floats[fi]);
+        if (!f || f->cur_alpha == 0) continue;
+
+        int fx = f->cur_pos.x;
+        int fy = f->cur_pos.y;
+        int fw = f->cur_w;
+        int fh = f->cur_h;  /* body height */
+
+        /* Shadow */
+        for (int row = 0; row < fh + FLOAT_TITLE_H && fy + row + 5 < (int)c->height; row++) {
+            for (int col = 0; col < fw && fx + col + 6 < (int)c->width; col++) {
+                int dx = fx + col + 6, dy = fy + row + 5;
+                if (dx < 0 || dy < 0) continue;
+                uint32_t* p = &c->pixels[dy * c->width + dx];
+                uint32_t bg = *p;
+                *p = ACOLOR((uint8_t)(ACOLOR_R(bg)*2/3),
+                            (uint8_t)(ACOLOR_G(bg)*2/3),
+                            (uint8_t)(ACOLOR_B(bg)*2/3), 0xFF);
+            }
+        }
+
+        /* Title bar background */
+        uint32_t bar_col = ACOLOR(0x1A, 0x2E, 0x5A, 0xFF);
+        draw_rect(c, fx, fy, fw, FLOAT_TITLE_H, bar_col);
+
+        /* Close button (top-right X) */
+        int bx = fx + fw - FLOAT_BTN_SZ - 4;
+        int by = fy + (FLOAT_TITLE_H - FLOAT_BTN_SZ) / 2;
+        draw_rect(c, bx, by, FLOAT_BTN_SZ, FLOAT_BTN_SZ, ACOLOR(0xC0,0x30,0x30,0xFF));
+        draw_string(c, bx + 4, by + 3, "x", 0xFFFFFFFF, ACOLOR(0,0,0,0));
+
+        /* Title text */
+        draw_string(c, fx + 8, fy + (FLOAT_TITLE_H - FONT_H) / 2,
+                    f->title, 0xFFFFFFFF, ACOLOR(0,0,0,0));
+
+        /* Window border */
+        draw_rect_outline(c, fx, fy, fw, fh + FLOAT_TITLE_H, 1,
+                          ACOLOR(0x40, 0x70, 0xD0, 0xFF));
+
+        /* Body surface */
+        are_blit_surface(c->pixels, (int)c->width, (int)c->height,
+                         f->buf, (int)f->buf_w, (int)f->buf_h,
+                         fx, fy + FLOAT_TITLE_H,
+                         fw, fh, f->cur_alpha);
+    }
+}
+
 /* Forward declarations */
 static void are_dispatch_input(void);
 static void are_splash(void);
@@ -86,10 +170,27 @@ sid_t are_add_surface(surface_type_t type,
     sid_t sid = surface_create(type, w, h, title, icon, rfn, ifn, cfn, ud);
     if (sid == SID_NONE) return SID_NONE;
 
-    if (type == SURF_OVERLAY)
+    if (type == SURF_OVERLAY) {
         context_push_overlay(sid);
-    else
+    } else if (type == SURF_FLOAT) {
+        /* Position centered on screen by default; full-alpha, no animation */
+        surface_t* s = surface_get(sid);
+        if (s) {
+            s->cur_pos.x = (int)(g_screen_w > s->buf_w ? (g_screen_w - s->buf_w) / 2 : 0);
+            s->cur_pos.y = (int)(g_screen_h > s->buf_h + FLOAT_TITLE_H
+                                 ? (g_screen_h - s->buf_h - FLOAT_TITLE_H) / 2 : 40);
+            s->tgt_pos   = s->cur_pos;
+            s->cur_w     = (int)s->buf_w;
+            s->tgt_w     = s->cur_w;
+            s->cur_h     = (int)s->buf_h;   /* body height only; title drawn separately */
+            s->tgt_h     = s->cur_h;
+            s->cur_alpha = 255;
+            s->tgt_alpha = 255;
+        }
+        float_add(sid);
+    } else {
         context_add_surface(sid);
+    }
 
     surface_invalidate(sid);
     return sid;
@@ -97,12 +198,19 @@ sid_t are_add_surface(surface_type_t type,
 
 void are_remove_surface(sid_t id)
 {
+    float_remove(id);           /* no-op if not a float */
     context_remove_surface(id);
     surface_destroy(id);
 }
 
 void are_push_overlay(sid_t id) { context_push_overlay(id); }
 void are_pop_overlay(void)      { context_pop_overlay();    }
+
+sid_t are_add_float(uint32_t w, uint32_t h, const char* title,
+                    surface_render_fn rfn, surface_input_fn ifn, void* ud)
+{
+    return are_add_surface(SURF_FLOAT, w, h, title, "W", rfn, ifn, NULL, ud);
+}
 
 /* =========================================================
  * Alpha-blending blit with nearest-neighbour scale
@@ -215,6 +323,69 @@ static void are_dispatch_input(void)
             if (ov && ov->on_input)
                 ov->on_input(ov->id, &ev, ov->userdata);
             continue;
+        }
+
+        /* Floating windows: drag + hit-test (back-to-front order) */
+        if (g_float_count > 0 && ev.type == INPUT_POINTER) {
+            bool float_hit = false;
+            /* Active drag takes priority */
+            if (g_drag_sid != SID_NONE) {
+                surface_t* df = surface_get(g_drag_sid);
+                if (df) {
+                    bool btn_up = !(ev.pointer.buttons & IBTN_LEFT)
+                                && (ev.pointer.prev_buttons & IBTN_LEFT);
+                    if (btn_up) {
+                        g_drag_sid = SID_NONE;
+                    } else {
+                        df->cur_pos.x = ev.pointer.x + g_drag_off.x;
+                        df->cur_pos.y = ev.pointer.y + g_drag_off.y;
+                        df->tgt_pos   = df->cur_pos;
+                    }
+                    float_hit = true;
+                }
+            }
+            /* New hit-test (top float first) */
+            if (!float_hit) {
+                for (int fi = g_float_count - 1; fi >= 0; fi--) {
+                    surface_t* f = surface_get(g_floats[fi]);
+                    if (!f) continue;
+                    int fx = f->cur_pos.x, fy = f->cur_pos.y;
+                    int fw = f->cur_w,    fh = f->cur_h + FLOAT_TITLE_H;
+                    int mx = ev.pointer.x, my = ev.pointer.y;
+                    if (mx < fx || mx >= fx+fw || my < fy || my >= fy+fh) continue;
+
+                    bool btn_dn = (ev.pointer.buttons & IBTN_LEFT)
+                               && !(ev.pointer.prev_buttons & IBTN_LEFT);
+                    bool in_titlebar = (my < fy + FLOAT_TITLE_H);
+
+                    /* Close-button click */
+                    int bx = fx + fw - FLOAT_BTN_SZ - 4;
+                    int by = fy + (FLOAT_TITLE_H - FLOAT_BTN_SZ) / 2;
+                    if (btn_dn && mx >= bx && mx < bx+FLOAT_BTN_SZ
+                               && my >= by && my < by+FLOAT_BTN_SZ) {
+                        are_remove_surface(g_floats[fi]);
+                        float_hit = true;
+                        break;
+                    }
+                    if (btn_dn && in_titlebar) {
+                        g_drag_sid   = f->id;
+                        g_drag_off.x = fx - mx;
+                        g_drag_off.y = fy - my;
+                        float_hit = true;
+                        break;
+                    }
+                    /* Body click → forward translated coords */
+                    if (f->on_input && !in_titlebar) {
+                        input_event_t lev = ev;
+                        lev.pointer.x -= fx;
+                        lev.pointer.y -= fy + FLOAT_TITLE_H;
+                        f->on_input(f->id, &lev, f->userdata);
+                    }
+                    float_hit = true;
+                    break;
+                }
+            }
+            if (float_hit) continue;
         }
 
         /* Forward to active surface */
@@ -334,6 +505,8 @@ void are_run(void)
             surface_tick(g_ctx.field[i]);
         for (int i = 0; i < g_ctx.overlay_count; i++)
             surface_tick(g_ctx.overlays[i]);
+        for (int i = 0; i < g_float_count; i++)
+            surface_tick(g_floats[i]);
 
         /* 5. Compose to back-buffer */
         screen = draw_main_canvas();
@@ -347,6 +520,9 @@ void are_run(void)
         }
 
         field_draw_nav_dots(&screen);
+
+        /* 5b. Compose floating windows above field/overlays */
+        are_compose_floats(&screen);
 
         /* 6. Render software cursor over the composed frame */
         cursor_erase();   /* restore pixels under old cursor position */

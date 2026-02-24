@@ -16,6 +16,7 @@
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
+#include <kernel/apkg.h>
 
 /* =========================================================
  * Layout
@@ -79,14 +80,13 @@ static ln_state_t g_ln;
 /* =========================================================
  * Filtering
  * ========================================================= */
-static bool app_matches(int i)
+
+/* Total items = core apps + installed packages */
+static int ln_total(void) { return LN_APP_COUNT + apkg_count(); }
+
+/* Case-insensitive substring match */
+static bool str_contains_ci(const char* name, const char* q, int qlen)
 {
-    if (g_ln.search_len == 0) return true;
-    /* Case-insensitive substring match */
-    const char* name = g_apps[i].name;
-    const char* q    = g_ln.search;
-    /* simple: check if q appears in name */
-    int qlen = g_ln.search_len;
     int nlen = (int)strlen(name);
     for (int s = 0; s <= nlen - qlen; s++) {
         bool match = true;
@@ -99,6 +99,20 @@ static bool app_matches(int i)
         if (match) return true;
     }
     return false;
+}
+
+/* i < LN_APP_COUNT → core app; i >= LN_APP_COUNT → installed package */
+static bool app_matches(int i)
+{
+    if (g_ln.search_len == 0) return true;
+    const char* name;
+    if (i < LN_APP_COUNT) {
+        name = g_apps[i].name;
+    } else {
+        const apkg_record_t* p = apkg_get(i - LN_APP_COUNT);
+        name = p ? p->name : "";
+    }
+    return str_contains_ci(name, g_ln.search, g_ln.search_len);
 }
 
 /* =========================================================
@@ -148,11 +162,14 @@ static void ln_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
     int total_w = LN_GRID_COLS * LN_ITEM_W + (LN_GRID_COLS-1) * LN_ITEM_GAP;
     int grid_x0 = ((int)w - total_w) / 2;
 
-    for (int i = 0; i < LN_APP_COUNT; i++) {
+    int total = ln_total();
+    for (int i = 0; i < total; i++) {
         if (!app_matches(i)) continue;
 
         int ix = grid_x0 + col * (LN_ITEM_W + LN_ITEM_GAP);
         int iy = row_y;
+        /* Stop drawing if we've gone off the bottom */
+        if (iy + LN_ITEM_H > (int)h) break;
 
         acolor_t ibg = (i == g_ln.selected) ? LN_ITEM_SEL
                      : (i == g_ln.hover)    ? LN_ITEM_HOV
@@ -160,19 +177,35 @@ static void ln_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
         draw_rect(&c, ix, iy, LN_ITEM_W, LN_ITEM_H, ibg);
         draw_rect_outline(&c, ix, iy, LN_ITEM_W, LN_ITEM_H, 1, LN_BORDER);
 
-        /* Icon circle area */
+        const char* icon_char;
+        acolor_t    icon_color;
+        const char* name;
+
+        if (i < LN_APP_COUNT) {
+            /* Core surface app */
+            icon_char  = g_apps[i].icon;
+            icon_color = g_apps[i].color;
+            name       = g_apps[i].name;
+        } else {
+            /* Installed package */
+            const apkg_record_t* pkg = apkg_get(i - LN_APP_COUNT);
+            icon_char  = "P";
+            icon_color = ACOLOR(0x40, 0x60, 0x40, 0xFF);
+            name       = pkg ? pkg->name : "?";
+        }
+
+        /* Icon area */
         int icx = ix + (LN_ITEM_W - LN_ICON_SZ) / 2;
         int icy = iy + 8;
-        draw_rect(&c, icx, icy, LN_ICON_SZ, LN_ICON_SZ, g_apps[i].color);
-        int icon_tx = icx + (LN_ICON_SZ - (int)strlen(g_apps[i].icon) * FONT_W) / 2;
+        draw_rect(&c, icx, icy, LN_ICON_SZ, LN_ICON_SZ, icon_color);
+        int icon_tx = icx + (LN_ICON_SZ - (int)strlen(icon_char) * FONT_W) / 2;
         int icon_ty = icy + (LN_ICON_SZ - FONT_H) / 2;
-        draw_string(&c, icon_tx, icon_ty, g_apps[i].icon,
-                    LN_ICON_FG, ACOLOR(0,0,0,0));
+        draw_string(&c, icon_tx, icon_ty, icon_char, LN_ICON_FG, ACOLOR(0,0,0,0));
 
         /* Name */
-        int nlx = ix + (LN_ITEM_W - (int)strlen(g_apps[i].name)*FONT_W) / 2;
+        int nlx = ix + (LN_ITEM_W - (int)strlen(name)*FONT_W) / 2;
         int nly = iy + LN_ICON_SZ + 12;
-        draw_string(&c, nlx, nly, g_apps[i].name, LN_TEXT_FG, ACOLOR(0,0,0,0));
+        draw_string(&c, nlx, nly, name, LN_TEXT_FG, ACOLOR(0,0,0,0));
 
         col++;
         if (col >= LN_GRID_COLS) {
@@ -198,10 +231,11 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
         int total_w = LN_GRID_COLS * LN_ITEM_W + (LN_GRID_COLS-1) * LN_ITEM_GAP;
         int grid_x0 = ((int)g_ln.surf_w - total_w) / 2;
 
-        /* Hover detection */
+        /* Hover detection (core apps + installed packages) */
         g_ln.hover = -1;
         int col = 0, row_y = grid_y;
-        for (int i = 0; i < LN_APP_COUNT; i++) {
+        int total = ln_total();
+        for (int i = 0; i < total; i++) {
             if (!app_matches(i)) continue;
             int ix = grid_x0 + col * (LN_ITEM_W + LN_ITEM_GAP);
             int iy = row_y;
@@ -217,9 +251,15 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
                      !(ev->pointer.prev_buttons & IBTN_LEFT);
         if (click && g_ln.hover >= 0) {
             g_ln.selected = g_ln.hover;
-            /* Jump to that surface in context and close overlay */
-            context_goto(g_apps[g_ln.selected].field_slot);
             are_pop_overlay();
+            if (g_ln.selected < LN_APP_COUNT) {
+                /* Core surface: switch to existing field slot */
+                context_goto(g_apps[g_ln.selected].field_slot);
+            } else {
+                /* Installed package: launch via apkg_exec */
+                const apkg_record_t* pkg = apkg_get(g_ln.selected - LN_APP_COUNT);
+                if (pkg) apkg_exec(pkg->name);
+            }
             surface_invalidate(id);
             return;
         }
@@ -235,8 +275,13 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
             return;
         } else if (kc == KEY_ENTER || ch == '\n' || ch == '\r') {
             if (g_ln.selected >= 0) {
-                context_goto(g_apps[g_ln.selected].field_slot);
                 are_pop_overlay();
+                if (g_ln.selected < LN_APP_COUNT) {
+                    context_goto(g_apps[g_ln.selected].field_slot);
+                } else {
+                    const apkg_record_t* pkg = apkg_get(g_ln.selected - LN_APP_COUNT);
+                    if (pkg) apkg_exec(pkg->name);
+                }
             }
         } else if (kc == KEY_BACKSPACE || ch == '\b') {
             if (g_ln.search_len > 0) {
@@ -251,13 +296,16 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
             if (g_ln.selected > 0) g_ln.selected--;
             surface_invalidate(id);
         } else if (kc == KEY_RIGHT_ARROW) {
-            if (g_ln.selected < LN_APP_COUNT - 1) g_ln.selected++;
+            int t = ln_total();
+            if (g_ln.selected < t - 1) g_ln.selected++;
             surface_invalidate(id);
         } else if (kc == KEY_UP_ARROW) {
-            g_ln.selected = (g_ln.selected - LN_GRID_COLS + LN_APP_COUNT) % LN_APP_COUNT;
+            int t = ln_total();
+            g_ln.selected = (g_ln.selected - LN_GRID_COLS + t) % t;
             surface_invalidate(id);
         } else if (kc == KEY_DOWN_ARROW) {
-            g_ln.selected = (g_ln.selected + LN_GRID_COLS) % LN_APP_COUNT;
+            int t = ln_total();
+            g_ln.selected = (g_ln.selected + LN_GRID_COLS) % t;
             surface_invalidate(id);
         }
     }

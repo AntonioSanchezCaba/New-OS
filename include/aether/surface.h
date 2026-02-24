@@ -23,9 +23,10 @@ typedef uint32_t sid_t;
 
 /* Surface type/category */
 typedef enum {
-    SURF_APP      = 0,   /* Regular application surface */
-    SURF_OVERLAY  = 1,   /* Floats above field (launcher, dialogs) */
-    SURF_SYSTEM   = 2,   /* System-level (splash, lock) */
+    SURF_APP      = 0,   /* Regular application surface                */
+    SURF_OVERLAY  = 1,   /* Modal overlay (launcher, dialogs)          */
+    SURF_SYSTEM   = 2,   /* System-level (splash, lock)                */
+    SURF_FLOAT    = 3,   /* Floating draggable window with title bar   */
 } surface_type_t;
 
 /* Surface lifecycle flags */

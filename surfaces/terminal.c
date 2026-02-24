@@ -17,8 +17,14 @@
 #include <string.h>
 #include <kernel.h>
 #include <kernel/version.h>
+#include <kernel/users.h>
+#include <kernel/apkg.h>
+#include <process.h>
 #include <scheduler.h>
 #include <drivers/timer.h>
+#include <net/ip.h>
+#include <net/net.h>
+#include <net/dns.h>
 
 /* =========================================================
  * Terminal geometry
@@ -193,6 +199,22 @@ static void term_make_path(const char* arg, char* out, int out_len)
 /* =========================================================
  * Simple built-in shell
  * ========================================================= */
+/* Parse dotted-decimal IPv4; returns 0 on failure */
+static uint32_t parse_ip4(const char* s)
+{
+    uint32_t a = 0, b = 0, c = 0, d = 0, n = 0;
+    for (; *s >= '0' && *s <= '9'; s++) a = a * 10 + (uint32_t)(*s - '0');
+    if (*s++ != '.') return 0;
+    for (; *s >= '0' && *s <= '9'; s++) b = b * 10 + (uint32_t)(*s - '0');
+    if (*s++ != '.') return 0;
+    for (; *s >= '0' && *s <= '9'; s++) c = c * 10 + (uint32_t)(*s - '0');
+    if (*s++ != '.') return 0;
+    for (; *s >= '0' && *s <= '9'; s++) d = d * 10 + (uint32_t)(*s - '0');
+    (void)n;
+    if (a > 255 || b > 255 || c > 255 || d > 255) return 0;
+    return a | (b << 8) | (c << 16) | (d << 24);
+}
+
 static void shell_exec(const char* cmd)
 {
     /* Skip leading whitespace */
@@ -217,6 +239,14 @@ static void shell_exec(const char* cmd)
         term_puts("  cp s d    — copy file\r\n");
         term_puts("  uptime    — show system uptime\r\n");
         term_puts("  mem       — show heap memory usage\r\n");
+        term_puts("  ps        — list running processes\r\n");
+        term_puts("  kill pid  — send SIGKILL to process\r\n");
+        term_puts("  whoami    — print current user\r\n");
+        term_puts("  logout    — end session\r\n");
+        term_puts("  ifconfig  — show network interface\r\n");
+        term_puts("  ping host — ICMP ping a host/IP\r\n");
+        term_puts("  dns host  — resolve hostname to IP\r\n");
+        term_puts("  run pkg   — execute installed package\r\n");
         term_puts("  reboot    — reboot system\r\n");
         term_puts("  halt      — halt system\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
@@ -380,6 +410,124 @@ static void shell_exec(const char* cmd)
                     term_puts("cp: done\r\n");
                 }
             }
+        }
+    } else if (strcmp(cmd, "ps") == 0) {
+        term_puts("  PID  PPID STATE    NAME\r\n");
+        char psbuf[80];
+        for (process_t* p = process_list; p; p = p->next) {
+            if (p->state == PROC_STATE_UNUSED || p->state == PROC_STATE_DEAD) continue;
+            const char* st = "?      ";
+            switch (p->state) {
+            case PROC_STATE_RUNNING:  st = "RUNNING"; break;
+            case PROC_STATE_READY:    st = "READY  "; break;
+            case PROC_STATE_SLEEPING: st = "SLEEP  "; break;
+            case PROC_STATE_WAITING:  st = "WAIT   "; break;
+            case PROC_STATE_ZOMBIE:   st = "ZOMBIE "; break;
+            default: break;
+            }
+            snprintf(psbuf, sizeof(psbuf), "%5d %5d %s %s\r\n",
+                     (int)p->pid, (int)p->ppid, st, p->name);
+            term_puts(psbuf);
+        }
+    } else if (strncmp(cmd, "kill ", 5) == 0) {
+        int kpid = 0;
+        for (const char* kp = cmd + 5; *kp >= '0' && *kp <= '9'; kp++)
+            kpid = kpid * 10 + (*kp - '0');
+        if (kpid > 0) {
+            process_kill((pid_t)kpid, 9);  /* SIGKILL */
+            char kb[40];
+            snprintf(kb, sizeof(kb), "kill: SIGKILL -> pid %d\r\n", kpid);
+            term_puts(kb);
+        } else {
+            term_puts("usage: kill <pid>\r\n");
+        }
+    } else if (strcmp(cmd, "whoami") == 0) {
+        if (current_process) {
+            const user_t* u = users_get_by_uid(current_process->uid);
+            if (u) {
+                term_puts(u->name);
+            } else {
+                char ub[24];
+                snprintf(ub, sizeof(ub), "uid=%u", current_process->uid);
+                term_puts(ub);
+            }
+            term_puts("\r\n");
+        }
+    } else if (strcmp(cmd, "logout") == 0 || strcmp(cmd, "exit") == 0) {
+        term_puts("Session ended.\r\n");
+        term_puts("Reboot to log in again.\r\n");
+    } else if (strcmp(cmd, "ifconfig") == 0) {
+        char ib[256];
+        uint32_t ip = net_iface.ip;
+        uint32_t gw = net_iface.gateway;
+        uint32_t nm = net_iface.netmask;
+        snprintf(ib, sizeof(ib),
+            "eth0: %s\r\n"
+            "  inet %u.%u.%u.%u  netmask %u.%u.%u.%u\r\n"
+            "  gateway %u.%u.%u.%u\r\n"
+            "  ether %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+            net_iface.up ? "UP RUNNING" : "DOWN",
+            ip&0xFF,(ip>>8)&0xFF,(ip>>16)&0xFF,(ip>>24)&0xFF,
+            nm&0xFF,(nm>>8)&0xFF,(nm>>16)&0xFF,(nm>>24)&0xFF,
+            gw&0xFF,(gw>>8)&0xFF,(gw>>16)&0xFF,(gw>>24)&0xFF,
+            net_iface.mac.b[0], net_iface.mac.b[1], net_iface.mac.b[2],
+            net_iface.mac.b[3], net_iface.mac.b[4], net_iface.mac.b[5]);
+        term_puts(ib);
+    } else if (strncmp(cmd, "ping ", 5) == 0) {
+        const char* host = cmd + 5;
+        uint32_t target = parse_ip4(host);
+        if (!target) target = dns_resolve(host);
+        if (!target) {
+            term_puts("ping: cannot resolve: ");
+            term_puts(host);
+            term_puts("\r\n");
+        } else {
+            char pb[80];
+            snprintf(pb, sizeof(pb), "PING %s (%u.%u.%u.%u)\r\n", host,
+                     target&0xFF,(target>>8)&0xFF,(target>>16)&0xFF,(target>>24)&0xFF);
+            term_puts(pb);
+            for (uint16_t seq = 1; seq <= 4; seq++) {
+                uint32_t t0 = (uint32_t)timer_get_ticks();
+                icmp_ping(target, seq);
+                uint32_t deadline = t0 + TIMER_FREQ * 2;
+                while ((uint32_t)timer_get_ticks() < deadline) {
+                    if (net_iface.poll) net_iface.poll();
+                    if (g_icmp_reply_seq == seq) break;
+                    scheduler_yield();
+                }
+                uint32_t ms = ((uint32_t)timer_get_ticks() - t0) * 1000 / TIMER_FREQ;
+                if (g_icmp_reply_seq == seq)
+                    snprintf(pb, sizeof(pb), "  seq=%u time=%ums\r\n", seq, ms);
+                else
+                    snprintf(pb, sizeof(pb), "  seq=%u timeout\r\n", seq);
+                term_puts(pb);
+            }
+        }
+    } else if (strncmp(cmd, "dns ", 4) == 0) {
+        const char* host = cmd + 4;
+        uint32_t ip = dns_resolve(host);
+        if (!ip) {
+            term_puts("dns: failed to resolve: ");
+            term_puts(host);
+            term_puts("\r\n");
+        } else {
+            char db[80];
+            snprintf(db, sizeof(db), "%s -> %u.%u.%u.%u\r\n", host,
+                     ip&0xFF,(ip>>8)&0xFF,(ip>>16)&0xFF,(ip>>24)&0xFF);
+            term_puts(db);
+        }
+    } else if (strncmp(cmd, "run ", 4) == 0) {
+        const char* pkg = cmd + 4;
+        pid_t rpid = apkg_exec(pkg);
+        if ((int)rpid < 0) {
+            term_puts("run: not found: ");
+            term_puts(pkg);
+            term_puts("\r\n");
+        } else {
+            char rb[64];
+            snprintf(rb, sizeof(rb), "run: '%s' launched as pid %d\r\n",
+                     pkg, (int)rpid);
+            term_puts(rb);
         }
     } else if (strcmp(cmd, "reboot") == 0) {
         term_puts("Rebooting...\r\n");

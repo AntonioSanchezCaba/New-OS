@@ -68,6 +68,16 @@ void are_remove_surface(sid_t id);
 void are_push_overlay(sid_t id);
 void are_pop_overlay(void);
 
+/* Create a floating draggable window positioned at (x,y).
+ * Pass x=-1, y=-1 to center automatically.
+ * The title bar (FLOAT_TITLE_H px) is drawn by the compositor;
+ * the render callback receives the body area only (w × h). */
+sid_t are_add_float(uint32_t w, uint32_t h,
+                    const char* title,
+                    surface_render_fn render_fn,
+                    surface_input_fn  input_fn,
+                    void* userdata);
+
 /* Blit one surface buffer onto destination with scale + alpha.
  * Public so surfaces can embed sub-canvases. */
 void are_blit_surface(uint32_t* dst, int dst_w, int dst_h,
