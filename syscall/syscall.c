@@ -703,6 +703,7 @@ void syscall_init(void)
     syscall_table[SYS_SIGACTION]   = sys_sigaction;
     syscall_table[SYS_SIGPROCMASK] = sys_sigprocmask;
     syscall_table[SYS_SIGPENDING]  = sys_sigpending;
+    /* SYS_SIGRETURN (52) is handled directly in syscall_handler() */
 
     /* Sockets */
     syscall_table[SYS_SOCKET]     = sys_socket;
@@ -751,6 +752,16 @@ void syscall_handler(cpu_registers_t* regs)
 {
     uint64_t syscall_num = regs->rax;
 
+    /*
+     * SYS_SIGRETURN must directly manipulate the interrupt frame to restore
+     * interrupted user context — it cannot go through the normal dispatch
+     * table (which only passes 6 integer arguments, not the frame pointer).
+     */
+    if (syscall_num == SYS_SIGRETURN) {
+        signal_do_sigreturn(regs);
+        return;
+    }
+
     if (syscall_num >= MAX_SYSCALLS || !syscall_table[syscall_num]) {
         kwarn("Unknown syscall %llu from PID=%u",
               syscall_num,
@@ -767,9 +778,11 @@ void syscall_handler(cpu_registers_t* regs)
 
     regs->rax = (uint64_t)ret;
 
-    /* Deliver any pending signals before returning to userspace */
+    /* Deliver any pending signals before returning to userspace.
+     * Pass the interrupt frame so that user-defined handlers can be
+     * dispatched via a trampoline on the user stack (ring-3 processes). */
     if (current_process && signal_has_pending(current_process)) {
-        signal_deliver_pending(current_process);
+        signal_deliver_pending(current_process, regs);
     }
 }
 

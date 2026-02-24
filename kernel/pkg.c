@@ -297,10 +297,116 @@ int pkg_verify(const char* aur_path)
 int pkg_build(const char* src_dir, const char* pkg_name,
                const char* version, const char* out_path)
 {
-    (void)src_dir; (void)pkg_name; (void)version; (void)out_path;
-    /* TODO: scan src_dir, build file table, write .aur */
-    kwarn("PKG: pkg_build not yet implemented");
-    return -ENOSYS;
+    if (!src_dir || !pkg_name || !version || !out_path) return -EINVAL;
+
+    kinfo("PKG: building '%s' v%s from '%s' → '%s'",
+          pkg_name, version, src_dir, out_path);
+
+    /* ── Step 1: scan src_dir and collect file entries ───────────────── */
+    pkg_file_entry_t* file_table =
+        (pkg_file_entry_t*)kmalloc(PKG_MAX_FILES * sizeof(pkg_file_entry_t));
+    if (!file_table) return -ENOMEM;
+
+    uint32_t file_count   = 0;
+    uint32_t payload_size = 0;
+
+    vfs_node_t* dir = vfs_open(src_dir, 0);
+    if (!dir) {
+        kfree(file_table);
+        kerror("PKG: cannot open src dir '%s'", src_dir);
+        return -ENOENT;
+    }
+
+    for (uint32_t idx = 0; file_count < PKG_MAX_FILES; idx++) {
+        vfs_dirent_t de;
+        if (vfs_readdir(dir, idx, &de) != 0) break;
+        if (de.name[0] == '.') continue;  /* skip . and .. */
+
+        pkg_file_entry_t* fe = &file_table[file_count];
+        memset(fe, 0, sizeof(*fe));
+
+        /* Build full install path: src_dir + '/' + name */
+        size_t dlen = strlen(src_dir);
+        size_t nlen = strlen(de.name);
+        if (dlen + 1 + nlen >= sizeof(fe->path)) continue;
+        memcpy(fe->path, src_dir, dlen);
+        fe->path[dlen] = '/';
+        memcpy(fe->path + dlen + 1, de.name, nlen + 1);
+
+        fe->offset = payload_size;
+        fe->size   = (uint32_t)de.size;
+        fe->mode   = 0644;
+        fe->type   = (de.type == VFS_TYPE_DIR) ? PKG_FILE_DIR : PKG_FILE_REG;
+
+        if (fe->type == PKG_FILE_REG)
+            payload_size += fe->size;
+
+        file_count++;
+    }
+    vfs_close(dir);
+
+    /* ── Step 2: read file contents into a payload buffer ────────────── */
+    uint8_t* payload = NULL;
+    if (payload_size > 0) {
+        payload = (uint8_t*)kmalloc(payload_size);
+        if (!payload) { kfree(file_table); return -ENOMEM; }
+
+        uint32_t woff = 0;
+        for (uint32_t i = 0; i < file_count; i++) {
+            if (file_table[i].type != PKG_FILE_REG || file_table[i].size == 0)
+                continue;
+            vfs_node_t* fn = vfs_open(file_table[i].path, 0);
+            if (!fn) { woff += file_table[i].size; continue; }
+            ssize_t n = vfs_read(fn, 0, file_table[i].size, payload + woff);
+            vfs_close(fn);
+            if (n > 0) woff += (uint32_t)n;
+            else woff += file_table[i].size; /* pad zeros for unreadable files */
+        }
+    }
+
+    uint32_t crc = payload_size ? pkg_crc32(payload, payload_size) : 0;
+
+    /* ── Step 3: assemble header ─────────────────────────────────────── */
+    pkg_header_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic          = PKG_MAGIC;
+    hdr.format_version = PKG_VERSION;
+    strncpy(hdr.name,    pkg_name, PKG_NAME_MAX - 1);
+    strncpy(hdr.version, version,  PKG_VER_MAX  - 1);
+    hdr.num_files      = file_count;
+    hdr.payload_offset = (uint32_t)(sizeof(hdr) +
+                                    file_count * sizeof(pkg_file_entry_t));
+    hdr.payload_size   = payload_size;
+    hdr.checksum       = crc;
+
+    /* ── Step 4: write the .aur archive ──────────────────────────────── */
+    vfs_node_t* out = vfs_open(out_path,
+                                VFS_O_CREAT | VFS_O_WRONLY | O_TRUNC);
+    if (!out) {
+        if (payload) kfree(payload);
+        kfree(file_table);
+        kerror("PKG: cannot create '%s'", out_path);
+        return -EACCES;
+    }
+
+    off_t woff = 0;
+    vfs_write(out, woff, sizeof(hdr), &hdr);
+    woff += (off_t)sizeof(hdr);
+
+    size_t tbl_sz = file_count * sizeof(pkg_file_entry_t);
+    vfs_write(out, woff, tbl_sz, file_table);
+    woff += (off_t)tbl_sz;
+
+    if (payload_size && payload)
+        vfs_write(out, woff, payload_size, payload);
+
+    vfs_close(out);
+    if (payload) kfree(payload);
+    kfree(file_table);
+
+    kinfo("PKG: built '%s' v%s — %u files, %u bytes payload → '%s'",
+          pkg_name, version, file_count, payload_size, out_path);
+    return 0;
 }
 
 /* ── Syscalls ────────────────────────────────────────────────────────── */

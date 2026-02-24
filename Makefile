@@ -173,6 +173,7 @@ C_SRCS := \
     apps/stress_test.c          \
     fs/ext2.c                   \
     fs/fat32.c                  \
+    fs/proc.c                   \
     kernel/signal.c             \
     kernel/shm.c                \
     kernel/tty.c                \

@@ -28,6 +28,7 @@
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <kernel/version.h>
+#include <services/login.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
@@ -302,6 +303,7 @@ void are_run(void)
 
     field_init(g_screen_w, g_screen_h);
     are_splash();
+    login_run();              /* graphical login screen — blocks until authenticated */
     are_launch_core_surfaces();
 
     g_running = true;

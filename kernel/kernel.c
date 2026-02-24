@@ -223,6 +223,12 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("Scanning disks and mounting partitions...");
     diskman_init();
 
+    /* Mount proc filesystem at /proc */
+    {
+        extern void procfs_init(void);
+        procfs_init();
+    }
+
     /* === Phase 6: Process subsystem === */
     kinfo("Initializing process manager...");
     process_init();

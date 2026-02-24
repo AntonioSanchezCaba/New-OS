@@ -92,17 +92,55 @@ typedef struct {
     size_t      alt_stack_sz;
 } signal_state_t;
 
+/*
+ * sig_frame_t - User-mode register state saved on the user stack before
+ * calling a signal handler.  sys_sigreturn() restores execution from it.
+ *
+ * Layout on the user stack (growing downward, set up by signal_deliver_pending):
+ *   [trampoline bytes: mov eax,52; int 0x80]  ← tramp_addr
+ *   [sig_frame_t]                              ← RSP after handler's ret
+ *   [return address → tramp_addr]              ← new user RSP (handler entry)
+ */
+typedef struct {
+    uint64_t r15, r14, r13, r12;
+    uint64_t r11, r10, r9,  r8;
+    uint64_t rbp, rdi, rsi, rdx;
+    uint64_t rcx, rbx, rax;
+    uint64_t rflags;
+    uint64_t rip;    /* interrupted user RIP */
+    uint64_t rsp;    /* interrupted user RSP */
+    uint64_t signo;  /* signal number (for validation) */
+} sig_frame_t;
+
 /* ── Signal subsystem API ────────────────────────────────────────────── */
 void   signal_init_process(void* proc);                       /* Zero out state */
 int    signal_send(pid_t pid, int sig);                       /* Send to process */
 int    signal_send_proc(void* proc, int sig);                 /* Direct send */
-void   signal_deliver_pending(void* proc);                    /* Called on syscall return */
+
+/*
+ * signal_deliver_pending - check pending signals and deliver the first
+ * unblocked one.  Must be called before returning to user space.
+ *
+ * @regs: pointer to the cpu_registers_t interrupt frame (cpu_registers_t*),
+ *        or NULL when no interrupt frame is available (kernel-mode context).
+ *        When non-NULL and the process is running in ring 3, user-defined
+ *        handlers are dispatched via a trampoline on the user stack.
+ *        When NULL or the process is in ring 0, SIG_DFL is applied instead.
+ */
+void   signal_deliver_pending(void* proc, void* regs);
 bool   signal_has_pending(void* proc);
 int    signal_do_sigaction(int sig, const sigaction_t* act,
                             sigaction_t* old);                /* Change disposition */
 int    signal_do_sigprocmask(int how, const sigset_t* set,
                               sigset_t* old);
 void   signal_default_action(void* proc, int sig);            /* Apply SIG_DFL */
+
+/*
+ * signal_do_sigreturn - restore interrupted user context from sig_frame_t.
+ * Called directly from syscall_handler() (not via dispatch table) so that
+ * the interrupt frame pointer can be passed in.
+ */
+void   signal_do_sigreturn(void* regs);
 
 /* Called from interrupt handlers to inject kernel signals */
 void   signal_raise_fault(int sig, uint64_t fault_addr);      /* SIGSEGV/SIGBUS/SIGFPE */
