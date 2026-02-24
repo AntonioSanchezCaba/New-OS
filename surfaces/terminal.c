@@ -161,6 +161,19 @@ static void term_make_path(const char* arg, char* out, int out_len)
     if (!arg || !arg[0]) {
         strncpy(out, g_term.cwd, out_len - 1);
         out[out_len - 1] = '\0';
+    } else if (arg[0] == '~') {
+        /* ~ expands to /home/user */
+        const char* rest = arg + 1;
+        if (*rest == '/' || *rest == '\0') {
+            int n = 0;
+            const char* base = "/home/user";
+            while (*base && n < out_len - 1) out[n++] = *base++;
+            while (*rest && n < out_len - 1) out[n++] = *rest++;
+            out[n] = '\0';
+        } else {
+            strncpy(out, arg, out_len - 1);
+            out[out_len - 1] = '\0';
+        }
     } else if (arg[0] == '/') {
         strncpy(out, arg, out_len - 1);
         out[out_len - 1] = '\0';
@@ -198,6 +211,8 @@ static void shell_exec(const char* cmd)
         term_puts("  cd path   — change directory\r\n");
         term_puts("  pwd       — print working directory\r\n");
         term_puts("  mkdir dir — create directory\r\n");
+        term_puts("  touch f   — create empty file\r\n");
+        term_puts("  rm f      — remove file\r\n");
         term_puts("  reboot    — reboot system\r\n");
         term_puts("  halt      — halt system\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
@@ -287,6 +302,30 @@ static void shell_exec(const char* cmd)
         } else {
             term_puts("mkdir: failed to create ");
             term_puts(newdir);
+            term_puts("\r\n");
+        }
+    } else if (strncmp(cmd, "touch ", 6) == 0) {
+        char touchpath[VFS_NAME_MAX + 1];
+        term_make_path(cmd + 6, touchpath, sizeof(touchpath));
+        if (vfs_create(touchpath, 0644) == 0) {
+            term_puts("touch: created ");
+            term_puts(touchpath);
+            term_puts("\r\n");
+        } else {
+            term_puts("touch: failed: ");
+            term_puts(touchpath);
+            term_puts("\r\n");
+        }
+    } else if (strncmp(cmd, "rm ", 3) == 0) {
+        char rmpath[VFS_NAME_MAX + 1];
+        term_make_path(cmd + 3, rmpath, sizeof(rmpath));
+        if (vfs_unlink(rmpath) == 0) {
+            term_puts("rm: removed ");
+            term_puts(rmpath);
+            term_puts("\r\n");
+        } else {
+            term_puts("rm: failed: ");
+            term_puts(rmpath);
             term_puts("\r\n");
         }
     } else if (strcmp(cmd, "reboot") == 0) {
