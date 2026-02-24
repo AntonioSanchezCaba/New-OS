@@ -259,6 +259,17 @@ vfs_node_t* ramfs_create_root(void)
     ramfs_mkdir(&root->vnode, "home", 0755);
     ramfs_mkdir(&root->vnode, "var",  0755);
     ramfs_mkdir(&root->vnode, "usr",  0755);
+    ramfs_mkdir(&root->vnode, "sys",  0755);
+
+    /* /sys/* — kernel subsystem data directories */
+    vfs_node_t* sys = ramfs_finddir(&root->vnode, "sys");
+    if (sys) {
+        ramfs_mkdir(sys, "pkg",      0755);  /* apkg: /sys/pkg/db */
+        ramfs_mkdir(sys, "users",    0700);  /* users: /sys/users/db */
+        ramfs_mkdir(sys, "packages", 0755);  /* pkg:   /sys/packages/* */
+        vfs_node_t* pkgs = ramfs_finddir(sys, "packages");
+        if (pkgs) ramfs_mkdir(pkgs, "cache", 0755);
+    }
 
     /* /etc/motd - message of the day */
     const char* motd =
