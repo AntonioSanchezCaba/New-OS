@@ -136,6 +136,9 @@ static int ramfs_mkdir(vfs_node_t* parent_vnode, const char* name, uint32_t mode
 {
     ramfs_node_t* parent = (ramfs_node_t*)parent_vnode;
 
+    /* Directory already exists — idempotent */
+    if (ramfs_finddir(parent_vnode, name)) return 0;
+
     if (parent->child_count >= RAMFS_MAX_CHILDREN) return -ENOSPC;
 
     ramfs_node_t* child = (ramfs_node_t*)kmalloc(sizeof(ramfs_node_t));
