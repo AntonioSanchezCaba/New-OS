@@ -51,6 +51,9 @@ void are_run(void);
 /* Stop the render loop (called from inside a surface callback). */
 void are_shutdown(void);
 
+/* Log out the current user: stops the render loop and returns to login. */
+void are_logout(void);
+
 /* Register a new surface and add it to the field.
  * Shorthand for surface_create() + context_add_surface(). */
 sid_t are_add_surface(surface_type_t type,

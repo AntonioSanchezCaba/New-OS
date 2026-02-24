@@ -454,8 +454,8 @@ static void shell_exec(const char* cmd)
             term_puts("\r\n");
         }
     } else if (strcmp(cmd, "logout") == 0 || strcmp(cmd, "exit") == 0) {
-        term_puts("Session ended.\r\n");
-        term_puts("Reboot to log in again.\r\n");
+        term_puts("Logging out...\r\n");
+        are_logout();
     } else if (strcmp(cmd, "ifconfig") == 0) {
         char ib[256];
         uint32_t ip = net_iface.ip;

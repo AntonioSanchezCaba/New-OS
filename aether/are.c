@@ -41,6 +41,7 @@ static bool     g_running  = false;
 static uint32_t g_screen_w = 0;
 static uint32_t g_screen_h = 0;
 static uint32_t g_frame    = 0;
+static bool     g_logout_requested = false;
 
 /* =========================================================
  * Floating window management
@@ -138,6 +139,7 @@ uint32_t are_screen_w(void)   { return g_screen_w; }
 uint32_t are_screen_h(void)   { return g_screen_h; }
 bool     are_running(void)    { return g_running;  }
 void     are_shutdown(void)   { g_running = false; }
+void     are_logout(void)     { g_logout_requested = true; g_running = false; }
 
 /* =========================================================
  * Init
@@ -474,65 +476,84 @@ void are_run(void)
 
     field_init(g_screen_w, g_screen_h);
     are_splash();
-    login_run();              /* graphical login screen — blocks until authenticated */
-    are_launch_core_surfaces();
 
-    g_running = true;
-    uint32_t last_ticks = 0;
-    canvas_t screen;
+    do {
+        g_logout_requested = false;
 
-    kinfo("ARE: entering render loop");
-
-    while (g_running) {
-        uint32_t now = timer_get_ticks();
-        /* ~60 Hz throttle */
-        if (now - last_ticks < 2) { scheduler_yield(); continue; }
-        last_ticks = now;
-        g_frame++;
-
-        /* 1. Poll hardware input */
-        input_poll();
-
-        /* 2. Dispatch input → gestures / surfaces */
-        are_dispatch_input();
-
-        /* 3. Tick animations */
-        context_tick();
-        field_tick();
-
-        /* 4. Render dirty surfaces to their own buffers */
+        /* Destroy all surfaces from the previous session (no-op first time) */
         for (int i = 0; i < g_ctx.field_count; i++)
-            surface_tick(g_ctx.field[i]);
+            surface_destroy(g_ctx.field[i]);
         for (int i = 0; i < g_ctx.overlay_count; i++)
-            surface_tick(g_ctx.overlays[i]);
+            surface_destroy(g_ctx.overlays[i]);
         for (int i = 0; i < g_float_count; i++)
-            surface_tick(g_floats[i]);
+            surface_destroy(g_floats[i]);
+        g_float_count = 0;
+        g_drag_sid    = SID_NONE;
+        surface_init();
+        context_init();
 
-        /* 5. Compose to back-buffer */
-        screen = draw_main_canvas();
-        field_draw_background(&screen);
+        login_run();              /* graphical login screen — blocks until authenticated */
+        are_launch_core_surfaces();
 
-        if (g_ctx.overview) {
-            field_compose(&screen);
-            field_draw_overview(&screen);
-        } else {
-            field_compose(&screen);
+        g_running = true;
+        uint32_t last_ticks = 0;
+        canvas_t screen;
+
+        kinfo("ARE: entering render loop");
+
+        while (g_running) {
+            uint32_t now = timer_get_ticks();
+            /* ~60 Hz throttle */
+            if (now - last_ticks < 2) { scheduler_yield(); continue; }
+            last_ticks = now;
+            g_frame++;
+
+            /* 1. Poll hardware input */
+            input_poll();
+
+            /* 2. Dispatch input → gestures / surfaces */
+            are_dispatch_input();
+
+            /* 3. Tick animations */
+            context_tick();
+            field_tick();
+
+            /* 4. Render dirty surfaces to their own buffers */
+            for (int i = 0; i < g_ctx.field_count; i++)
+                surface_tick(g_ctx.field[i]);
+            for (int i = 0; i < g_ctx.overlay_count; i++)
+                surface_tick(g_ctx.overlays[i]);
+            for (int i = 0; i < g_float_count; i++)
+                surface_tick(g_floats[i]);
+
+            /* 5. Compose to back-buffer */
+            screen = draw_main_canvas();
+            field_draw_background(&screen);
+
+            if (g_ctx.overview) {
+                field_compose(&screen);
+                field_draw_overview(&screen);
+            } else {
+                field_compose(&screen);
+            }
+
+            field_draw_nav_dots(&screen);
+
+            /* 5b. Compose floating windows above field/overlays */
+            are_compose_floats(&screen);
+
+            /* 6. Render software cursor over the composed frame */
+            cursor_erase();   /* restore pixels under old cursor position */
+            cursor_render();  /* save pixels, blit cursor sprite */
+
+            /* 7. Flip */
+            fb_flip();
+
+            scheduler_yield();
         }
 
-        field_draw_nav_dots(&screen);
-
-        /* 5b. Compose floating windows above field/overlays */
-        are_compose_floats(&screen);
-
-        /* 6. Render software cursor over the composed frame */
-        cursor_erase();   /* restore pixels under old cursor position */
-        cursor_render();  /* save pixels, blit cursor sprite */
-
-        /* 7. Flip */
-        fb_flip();
-
-        scheduler_yield();
-    }
+        kinfo("ARE: session ended%s", g_logout_requested ? " (logout)" : "");
+    } while (g_logout_requested);
 
     kinfo("ARE: render loop exited");
 }

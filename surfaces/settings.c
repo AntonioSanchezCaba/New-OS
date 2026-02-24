@@ -16,6 +16,8 @@
 #include <string.h>
 #include <kernel.h>
 #include <kernel/version.h>
+#include <kernel/users.h>
+#include <process.h>
 
 /* =========================================================
  * Layout
@@ -46,9 +48,9 @@
 /* =========================================================
  * State
  * ========================================================= */
-#define ST_TAB_COUNT  3
+#define ST_TAB_COUNT  4
 static const char* const st_tab_names[ST_TAB_COUNT] = {
-    "Display", "Appearance", "About"
+    "Display", "Appearance", "About", "Account"
 };
 
 typedef struct {
@@ -237,6 +239,33 @@ static void render_tab_about(canvas_t* c, int x, int y, int w, int h)
     }
 }
 
+static void render_tab_account(canvas_t* c, int x, int y, int w, int h)
+{
+    (void)h;
+    int ry = y;
+
+    const user_t* u = NULL;
+    if (current_process)
+        u = users_get_by_uid(current_process->uid);
+
+    if (u) {
+        char uid_str[16];
+        snprintf(uid_str, sizeof(uid_str), "%u", u->uid);
+        draw_setting_row(c, x, ry, w, "Username", u->name,  false); ry += ST_ROW_H;
+        draw_setting_row(c, x, ry, w, "UID",      uid_str,  true);  ry += ST_ROW_H;
+        draw_setting_row(c, x, ry, w, "Home",     u->home,  false); ry += ST_ROW_H;
+    } else {
+        draw_setting_row(c, x, ry, w, "User", "unknown", false);    ry += ST_ROW_H;
+    }
+
+    ry += 16;  /* gap before logout button */
+
+    /* Log Out button */
+    draw_rect(c, x + ST_PAD, ry, 120, 36, ST_ACCENT);
+    draw_string(c, x + ST_PAD + (120 - 7*(int)FONT_W) / 2, ry + (36 - FONT_H) / 2,
+                "Log Out", 0xFFFFFFFF, ACOLOR(0,0,0,0));
+}
+
 /* =========================================================
  * Render callback
  * ========================================================= */
@@ -279,6 +308,7 @@ static void st_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
     case 0: render_tab_display   (&c, 0, content_y, (int)w, (int)h - content_y); break;
     case 1: render_tab_appearance(&c, 0, content_y, (int)w, (int)h - content_y); break;
     case 2: render_tab_about     (&c, 0, content_y, (int)w, (int)h - content_y); break;
+    case 3: render_tab_account   (&c, 0, content_y, (int)w, (int)h - content_y); break;
     }
 }
 
@@ -331,6 +361,15 @@ static void st_input(sid_t id, const input_event_t* ev, void* ud)
                         settings_save();
                         surface_invalidate(id);
                     }
+                }
+            }
+            /* Account tab: log-out button */
+            if (g_st.tab == 3) {
+                int content_y = ST_TITLE_H + ST_TAB_H + 8;
+                int btn_y = content_y + 3 * ST_ROW_H + 16;
+                if (my >= btn_y && my < btn_y + 36 &&
+                    mx >= ST_PAD  && mx < ST_PAD + 120) {
+                    are_logout();
                 }
             }
         }
