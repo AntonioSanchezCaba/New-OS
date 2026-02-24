@@ -367,17 +367,16 @@ static void shell_exec(const char* cmd)
             if (!sf || (sf->flags & VFS_DIRECTORY)) {
                 term_puts("cp: source not found or is directory\r\n");
             } else {
-                vfs_create(dst, 0644);
-                vfs_node_t* df = vfs_resolve_path(dst);
+                vfs_node_t* df = vfs_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
                 if (!df) {
                     term_puts("cp: cannot create destination\r\n");
                 } else {
                     char cpbuf[512]; off_t off = 0; ssize_t n;
-                    df->size = 0;  /* truncate dst */
                     while ((n = vfs_read(sf, off, sizeof(cpbuf), cpbuf)) > 0) {
                         vfs_write(df, off, (size_t)n, cpbuf);
                         off += n;
                     }
+                    vfs_close(df);
                     term_puts("cp: done\r\n");
                 }
             }

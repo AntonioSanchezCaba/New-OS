@@ -158,6 +158,9 @@ static int ramfs_create(vfs_node_t* parent_vnode, const char* name, uint32_t mod
 {
     ramfs_node_t* parent = (ramfs_node_t*)parent_vnode;
 
+    /* Return success (idempotent) if file already exists */
+    if (ramfs_finddir(parent_vnode, name)) return 0;
+
     if (parent->child_count >= RAMFS_MAX_CHILDREN) return -ENOSPC;
 
     ramfs_node_t* child = (ramfs_node_t*)kmalloc(sizeof(ramfs_node_t));
