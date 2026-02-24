@@ -165,8 +165,10 @@ void users_save(void)
         vfs_create(USER_DB_PATH, 0);
         node = vfs_resolve_path(USER_DB_PATH);
     }
-    if (node && node->ops && node->ops->write)
+    if (node && node->ops && node->ops->write) {
+        node->size = 0;  /* truncate before overwrite */
         node->ops->write(node, 0, pos, buf);
+    }
 }
 
 /* =========================================================

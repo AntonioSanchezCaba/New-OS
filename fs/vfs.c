@@ -120,6 +120,10 @@ vfs_node_t* vfs_open(const char* path, int flags)
 
     if (!node) return NULL;
 
+    /* O_TRUNC: reset file size to 0 before returning */
+    if ((flags & O_TRUNC) && !(node->flags & VFS_DIRECTORY))
+        node->size = 0;
+
     /* Call the filesystem's open handler if present */
     if (node->ops && node->ops->open) {
         node->ops->open(node, flags);

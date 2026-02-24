@@ -244,7 +244,7 @@ void apkg_save(void)
     }
     buf[pos] = '\0';
 
-    vfs_node_t* node = vfs_open(APKG_DB_VFS_PATH, VFS_O_WRITE | VFS_O_CREATE);
+    vfs_node_t* node = vfs_open(APKG_DB_VFS_PATH, VFS_O_WRITE | VFS_O_CREATE | VFS_O_TRUNC);
     if (node) {
         vfs_write(node, 0, (size_t)pos, buf);
         vfs_close(node);
