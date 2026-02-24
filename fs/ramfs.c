@@ -257,6 +257,8 @@ vfs_node_t* ramfs_create_root(void)
     ramfs_mkdir(&root->vnode, "proc", 0555);
     ramfs_mkdir(&root->vnode, "tmp",  0777);
     ramfs_mkdir(&root->vnode, "home", 0755);
+    vfs_node_t* home = ramfs_finddir(&root->vnode, "home");
+    if (home) ramfs_mkdir(home, "user", 0755);  /* default user home */
     ramfs_mkdir(&root->vnode, "var",  0755);
     ramfs_mkdir(&root->vnode, "usr",  0755);
     ramfs_mkdir(&root->vnode, "sys",  0755);
