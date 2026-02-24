@@ -42,40 +42,95 @@ vfs_node_t* vfs_root(void)
  * ============================================================ */
 
 /*
+ * vfs_canonicalize - resolve '.' and '..' components in a path.
+ * Input must be absolute (starts with '/').
+ * Output is written to @out (size @out_len); always starts with '/'.
+ */
+static void vfs_canonicalize(const char* path, char* out, int out_len)
+{
+    /* Tokenize into up to 64 components (pointers into a scratch buffer) */
+    char scratch[VFS_NAME_MAX * 16];
+    strncpy(scratch, path, sizeof(scratch) - 1);
+    scratch[sizeof(scratch) - 1] = '\0';
+
+    const char* parts[64];
+    int depth = 0;
+
+    char* p = scratch;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        char* start = p;
+        while (*p && *p != '/') p++;
+        if (*p) *p++ = '\0';
+
+        if (start[0] == '.' && start[1] == '\0') {
+            /* '.' — stay */
+        } else if (start[0] == '.' && start[1] == '.' && start[2] == '\0') {
+            /* '..' — go up one level */
+            if (depth > 0) depth--;
+        } else {
+            if (depth < 64) parts[depth++] = start;
+        }
+    }
+
+    /* Reconstruct */
+    int pos = 0;
+    if (out_len < 2) { if (out_len > 0) out[0] = '\0'; return; }
+    out[pos++] = '/';
+    for (int i = 0; i < depth && pos < out_len - 1; i++) {
+        if (i > 0 && pos < out_len - 1) out[pos++] = '/';
+        int len = (int)strlen(parts[i]);
+        if (pos + len < out_len - 1) {
+            memcpy(out + pos, parts[i], (size_t)len);
+            pos += len;
+        }
+    }
+    out[pos] = '\0';
+}
+
+/*
  * vfs_resolve_path - walk the VFS tree to find the node at @path.
  *
  * Supports absolute paths starting with '/'.
  * Path components are split by '/'.
+ * '.' and '..' are resolved before walking the tree.
  * Returns the vfs_node_t for the final component, or NULL if not found.
  */
 vfs_node_t* vfs_resolve_path(const char* path)
 {
     if (!path || !vfs_root_node) return NULL;
 
-    /* Start from root for absolute paths */
+    /* Canonicalize to resolve . and .. */
+    char canon[VFS_NAME_MAX * 16];
+    if (path[0] == '/') {
+        vfs_canonicalize(path, canon, (int)sizeof(canon));
+    } else {
+        /* Relative path: prepend '/' for simple cases */
+        char abs_path[VFS_NAME_MAX * 16];
+        abs_path[0] = '/';
+        strncpy(abs_path + 1, path, sizeof(abs_path) - 2);
+        abs_path[sizeof(abs_path) - 1] = '\0';
+        vfs_canonicalize(abs_path, canon, (int)sizeof(canon));
+    }
+
+    /* Start from root */
     vfs_node_t* node = vfs_root_node;
+    const char* p    = canon + 1; /* skip leading '/' */
 
-    if (*path == '/') path++; /* Skip leading '/' */
+    if (*p == '\0') return vfs_root_node; /* Bare "/" */
 
-    if (*path == '\0') return vfs_root_node; /* Bare "/" */
-
-    /* Copy path so we can tokenize it */
+    /* Copy so we can tokenize */
     char tmp[VFS_NAME_MAX * 16];
-    strncpy(tmp, path, sizeof(tmp) - 1);
+    strncpy(tmp, p, sizeof(tmp) - 1);
     tmp[sizeof(tmp) - 1] = '\0';
 
     char* saveptr = NULL;
-    char* token = strtok_r(tmp, "/", &saveptr);
+    char* token   = strtok_r(tmp, "/", &saveptr);
 
     while (token && node) {
-        if (strcmp(token, ".") == 0) {
-            /* Stay at current node */
-        } else if (strcmp(token, "..") == 0) {
-            /* Parent not tracked in this simple VFS - stay at root */
-        } else {
-            if (!(node->flags & VFS_DIRECTORY)) return NULL;
-            node = vfs_finddir(node, token);
-        }
+        if (!(node->flags & VFS_DIRECTORY)) return NULL;
+        node = vfs_finddir(node, token);
         token = strtok_r(NULL, "/", &saveptr);
     }
 

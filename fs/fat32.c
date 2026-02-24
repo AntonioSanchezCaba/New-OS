@@ -346,6 +346,112 @@ static int fat32_resolve(fat32_fs_t* fs, const char* path,
 
 /* ── VFS node ops ────────────────────────────────────────────────────── */
 
+/*
+ * Per-node context stored in vfs_node_t::impl.
+ * Tracks the directory location of the on-disk directory entry so we can
+ * write back updated file sizes and first-cluster values after writes.
+ */
+typedef struct {
+    fat32_fs_t* fs;
+    uint32_t    dir_cluster; /* Cluster of the directory holding this entry */
+    uint32_t    dirent_idx;  /* Raw 32-byte entry index in that cluster chain */
+} fat32_node_ctx_t;
+
+/* ── Directory-write helpers ─────────────────────────────────────────── */
+
+/* Convert a filename string to 8.3 format (space-padded, upper-cased). */
+static void fat32_str_to_83(const char* name, uint8_t* out_name, uint8_t* out_ext)
+{
+    memset(out_name, ' ', 8);
+    memset(out_ext,  ' ', 3);
+
+    /* Find the last dot for extension split */
+    const char* dot = NULL;
+    for (const char* p = name; *p; p++)
+        if (*p == '.') dot = p;
+
+    int ni = 0;
+    const char* s = name;
+    while (*s && s != dot && ni < 8) {
+        char c = *s++;
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        out_name[ni++] = (uint8_t)c;
+    }
+    if (dot) {
+        s = dot + 1;
+        int ei = 0;
+        while (*s && ei < 3) {
+            char c = *s++;
+            if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+            out_ext[ei++] = (uint8_t)c;
+        }
+    }
+}
+
+/*
+ * Write a raw 32-byte directory entry at position @entry_idx in the
+ * directory cluster chain starting at @dir_cluster.
+ */
+static int fat32_write_dirent_at(fat32_fs_t* fs, uint32_t dir_cluster,
+                                  uint32_t entry_idx, const fat32_dirent_t* de)
+{
+    size_t   bpc = fs->bytes_per_cluster;
+    uint32_t epc = bpc / 32;
+    uint32_t ci  = entry_idx / epc;
+    uint32_t off = entry_idx % epc;
+
+    uint32_t c = dir_cluster;
+    for (uint32_t i = 0; i < ci; i++) {
+        c = fat32_next_cluster(fs, c);
+        if (c >= FAT32_EOC_MIN || c < 2) return -ENOSPC;
+    }
+
+    uint8_t* cbuf = (uint8_t*)kmalloc(bpc);
+    if (!cbuf) return -ENOMEM;
+    if (fat32_read_cluster(fs, c, cbuf) != 0) { kfree(cbuf); return -EIO; }
+    memcpy(cbuf + off * 32, de, 32);
+    int r = fat32_write_cluster(fs, c, cbuf);
+    kfree(cbuf);
+    return r;
+}
+
+/*
+ * Find the first empty (0x00) or deleted (0xE5) directory entry.
+ * Extends the directory with a new cluster if all slots are used.
+ * Returns the entry index on success, or a negative errno.
+ */
+static int fat32_find_free_dirent(fat32_fs_t* fs, uint32_t dir_cluster)
+{
+    size_t   bpc  = fs->bytes_per_cluster;
+    uint32_t epc  = bpc / 32;
+    uint8_t* cbuf = (uint8_t*)kmalloc(bpc);
+    if (!cbuf) return -ENOMEM;
+
+    uint32_t c    = dir_cluster;
+    uint32_t cnum = 0;
+    uint32_t prev = 0;
+
+    while (c >= 2 && c < FAT32_EOC_MIN) {
+        if (fat32_read_cluster(fs, c, cbuf) != 0) { kfree(cbuf); return -EIO; }
+        for (uint32_t i = 0; i < epc; i++) {
+            fat32_dirent_t* de = (fat32_dirent_t*)(cbuf + i * 32);
+            if (de->name[0] == 0x00 || (uint8_t)de->name[0] == 0xE5) {
+                kfree(cbuf);
+                return (int)(cnum * epc + i);
+            }
+        }
+        prev = c;
+        c    = fat32_next_cluster(fs, c);
+        cnum++;
+    }
+    kfree(cbuf);
+
+    /* No free slot — extend directory with a new cluster */
+    uint32_t new_c = fat32_alloc_cluster(fs, prev);
+    if (new_c < 2) return -ENOSPC;
+    return (int)(cnum * epc);
+}
+
 /* Forward declarations for ops table */
 static vfs_node_t*   _fat32_vfs_finddir(vfs_node_t* parent, const char* name);
 static vfs_dirent_t* _fat32_vfs_readdir_op(vfs_node_t* node, uint32_t idx);
@@ -353,6 +459,11 @@ static ssize_t       _fat32_vfs_read(vfs_node_t* node, off_t offset,
                                       size_t len, void* buf);
 static ssize_t       _fat32_vfs_write(vfs_node_t* node, off_t offset,
                                        size_t len, const void* buf);
+static int           _fat32_vfs_create(vfs_node_t* parent, const char* name,
+                                        uint32_t mode);
+static int           _fat32_vfs_mkdir_op(vfs_node_t* parent, const char* name,
+                                          uint32_t mode);
+static int           _fat32_vfs_unlink(vfs_node_t* parent, const char* name);
 
 static const vfs_ops_t fat32_vfs_ops = {
     .read    = _fat32_vfs_read,
@@ -361,32 +472,45 @@ static const vfs_ops_t fat32_vfs_ops = {
     .readdir = _fat32_vfs_readdir_op,
     .open    = NULL,
     .close   = NULL,
-    .mkdir   = NULL,
-    .create  = NULL,
+    .mkdir   = _fat32_vfs_mkdir_op,
+    .create  = _fat32_vfs_create,
+    .unlink  = _fat32_vfs_unlink,
 };
 
-/* Helper: allocate a vfs_node_t for a FAT32 directory entry */
-static vfs_node_t* fat32_make_node(fat32_fs_t* fs, const fat32_entry_t* e)
+/*
+ * Allocate a vfs_node_t for a FAT32 directory entry.
+ * @dir_cluster  — cluster of the directory that contains this entry.
+ * @dirent_idx   — raw 32-byte entry index within that directory.
+ */
+static vfs_node_t* fat32_make_node(fat32_fs_t* fs, const fat32_entry_t* e,
+                                    uint32_t dir_cluster, uint32_t dirent_idx)
 {
-    vfs_node_t* n = (vfs_node_t*)kmalloc(sizeof(vfs_node_t));
-    if (!n) return NULL;
-    memset(n, 0, sizeof(*n));
+    fat32_node_ctx_t* ctx = (fat32_node_ctx_t*)kmalloc(sizeof(fat32_node_ctx_t));
+    vfs_node_t*       n   = (vfs_node_t*)kmalloc(sizeof(vfs_node_t));
+    if (!ctx || !n) { kfree(ctx); kfree(n); return NULL; }
+    memset(n,   0, sizeof(*n));
+    memset(ctx, 0, sizeof(*ctx));
+
+    ctx->fs          = fs;
+    ctx->dir_cluster = dir_cluster;
+    ctx->dirent_idx  = dirent_idx;
+
     strncpy(n->name, e->name, VFS_NAME_MAX);
-    n->size   = e->size;
-    n->inode  = e->first_cluster;          /* cluster number as inode */
-    n->impl   = (void*)fs;
-    n->ops    = (vfs_ops_t*)&fat32_vfs_ops;
-    n->flags  = (e->attr & FAT_ATTR_DIR) ? VFS_DIRECTORY : VFS_FILE;
+    n->size  = e->size;
+    n->inode = e->first_cluster;    /* cluster number used as inode */
+    n->impl  = (void*)ctx;
+    n->ops   = (vfs_ops_t*)&fat32_vfs_ops;
+    n->flags = (e->attr & FAT_ATTR_DIR) ? VFS_DIRECTORY : VFS_FILE;
     return n;
 }
 
 /* finddir: find a child by name in the directory at parent->inode */
 static vfs_node_t* _fat32_vfs_finddir(vfs_node_t* parent, const char* name)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)parent->impl;
+    fat32_node_ctx_t* pctx = (fat32_node_ctx_t*)parent->impl;
+    fat32_fs_t* fs = pctx->fs;
     if (!fs || !fs->valid) return NULL;
 
-    /* Directory cluster: root == fs->root_cluster, subdirs == inode */
     uint32_t dir_cluster = (parent->inode >= 2) ? (uint32_t)parent->inode
                                                  : fs->root_cluster;
     fat32_entry_t entry;
@@ -395,7 +519,7 @@ static vfs_node_t* _fat32_vfs_finddir(vfs_node_t* parent, const char* name)
         if (r < 0) break;
         if (!entry.valid) continue;
         if (strncmp(entry.name, name, 255) == 0)
-            return fat32_make_node(fs, &entry);
+            return fat32_make_node(fs, &entry, dir_cluster, i);
     }
     return NULL;
 }
@@ -403,10 +527,11 @@ static vfs_node_t* _fat32_vfs_finddir(vfs_node_t* parent, const char* name)
 /* Static dirent buffer for readdir (one at a time — single-threaded kernel) */
 static vfs_dirent_t _fat32_dirent_buf;
 
-/* readdir: return the idx-th entry from the directory at node->inode */
+/* readdir: return the idx-th valid entry from the directory at node->inode */
 static vfs_dirent_t* _fat32_vfs_readdir_op(vfs_node_t* node, uint32_t idx)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
+    fat32_node_ctx_t* ctx = (fat32_node_ctx_t*)node->impl;
+    fat32_fs_t* fs = ctx->fs;
     if (!fs || !fs->valid) return NULL;
 
     uint32_t dir_cluster = (node->inode >= 2) ? (uint32_t)node->inode
@@ -433,7 +558,8 @@ static vfs_dirent_t* _fat32_vfs_readdir_op(vfs_node_t* node, uint32_t idx)
 static ssize_t _fat32_vfs_read(vfs_node_t* node, off_t offset,
                                 size_t len, void* buf)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
+    fat32_node_ctx_t* ctx = (fat32_node_ctx_t*)node->impl;
+    fat32_fs_t* fs = ctx->fs;
     if (!fs || !fs->valid) return -EIO;
     if (node->flags & VFS_DIRECTORY) return -EISDIR;
 
@@ -472,7 +598,8 @@ static ssize_t _fat32_vfs_read(vfs_node_t* node, off_t offset,
 static ssize_t _fat32_vfs_write(vfs_node_t* node, off_t offset,
                                   size_t len, const void* buf)
 {
-    fat32_fs_t* fs = (fat32_fs_t*)node->impl;
+    fat32_node_ctx_t* ctx = (fat32_node_ctx_t*)node->impl;
+    fat32_fs_t* fs = ctx->fs;
     if (!fs || !fs->valid) return -EIO;
     if (len == 0) return 0;
     if (node->flags & VFS_DIRECTORY) return -EISDIR;
@@ -551,16 +678,166 @@ static ssize_t _fat32_vfs_write(vfs_node_t* node, off_t offset,
 
     kfree(cbuf);
 
-    /* Update file size in the VFS node if we grew the file */
-    if (end_byte > (uint64_t)node->size) {
+    /* Update the in-memory VFS node if the file grew */
+    bool size_changed = (end_byte > (uint64_t)node->size);
+    if (size_changed)
         node->size = (uint32_t)end_byte;
-        fat32_sync(fs);
+
+    /*
+     * Write back the updated file size and first cluster to the on-disk
+     * directory entry so the changes survive a remount.
+     */
+    if (ctx->dir_cluster != 0 && ctx->dirent_idx != (uint32_t)-1) {
+        size_t   bpc  = fs->bytes_per_cluster;
+        uint32_t epc  = bpc / 32;
+        uint32_t ci   = ctx->dirent_idx / epc;
+        uint32_t off  = ctx->dirent_idx % epc;
+        uint32_t dc   = ctx->dir_cluster;
+        for (uint32_t i = 0; i < ci; i++) {
+            dc = fat32_next_cluster(fs, dc);
+            if (dc >= FAT32_EOC_MIN || dc < 2) { dc = 0; break; }
+        }
+        if (dc >= 2) {
+            uint8_t* dbuf = (uint8_t*)kmalloc(bpc);
+            if (dbuf && fat32_read_cluster(fs, dc, dbuf) == 0) {
+                fat32_dirent_t* de = (fat32_dirent_t*)(dbuf + off * 32);
+                de->file_size  = (uint32_t)node->size;
+                de->cluster_hi = (uint16_t)(node->inode >> 16);
+                de->cluster_lo = (uint16_t)(node->inode & 0xFFFF);
+                fat32_write_cluster(fs, dc, dbuf);
+            }
+            kfree(dbuf);
+        }
     }
+    fat32_sync(fs);
 
     return done;
 }
 
-/* (readdir and finddir ops are above in the VFS ops section) */
+/* ── Write ops: create, mkdir, unlink ───────────────────────────────── */
+
+static int _fat32_vfs_create(vfs_node_t* parent_vnode, const char* name,
+                              uint32_t mode)
+{
+    fat32_node_ctx_t* pctx = (fat32_node_ctx_t*)parent_vnode->impl;
+    fat32_fs_t* fs = pctx->fs;
+    (void)mode;
+
+    uint32_t dir_cluster = (parent_vnode->inode >= 2)
+                           ? (uint32_t)parent_vnode->inode : fs->root_cluster;
+
+    int idx = fat32_find_free_dirent(fs, dir_cluster);
+    if (idx < 0) return idx;
+
+    fat32_dirent_t de;
+    memset(&de, 0, sizeof(de));
+    fat32_str_to_83(name, de.name, de.ext);
+    de.attr = FAT_ATTR_ARCHIVE;  /* regular file */
+    /* cluster_hi/lo and file_size all 0: empty file */
+
+    int r = fat32_write_dirent_at(fs, dir_cluster, (uint32_t)idx, &de);
+    if (r == 0) fat32_sync(fs);
+    return r;
+}
+
+static int _fat32_vfs_mkdir_op(vfs_node_t* parent_vnode, const char* name,
+                                uint32_t mode)
+{
+    fat32_node_ctx_t* pctx = (fat32_node_ctx_t*)parent_vnode->impl;
+    fat32_fs_t* fs = pctx->fs;
+    (void)mode;
+
+    uint32_t parent_cluster = (parent_vnode->inode >= 2)
+                              ? (uint32_t)parent_vnode->inode : fs->root_cluster;
+
+    /* Allocate a cluster for the new directory */
+    uint32_t new_cluster = fat32_alloc_cluster(fs, 0);
+    if (new_cluster < 2) return -ENOSPC;
+
+    /* Build the initial cluster: '.' and '..' entries */
+    size_t   bpc  = fs->bytes_per_cluster;
+    uint8_t* cbuf = (uint8_t*)kmalloc(bpc);
+    if (!cbuf) { fat32_free_chain(fs, new_cluster); return -ENOMEM; }
+    memset(cbuf, 0, bpc);
+
+    fat32_dirent_t* dot = (fat32_dirent_t*)cbuf;
+    memset(dot->name, ' ', 8); memset(dot->ext, ' ', 3);
+    dot->name[0]   = '.';
+    dot->attr      = FAT_ATTR_DIR;
+    dot->cluster_hi = (uint16_t)(new_cluster >> 16);
+    dot->cluster_lo = (uint16_t)(new_cluster & 0xFFFF);
+
+    fat32_dirent_t* dotdot = (fat32_dirent_t*)(cbuf + 32);
+    memset(dotdot->name, ' ', 8); memset(dotdot->ext, ' ', 3);
+    dotdot->name[0] = '.'; dotdot->name[1] = '.';
+    dotdot->attr    = FAT_ATTR_DIR;
+    dotdot->cluster_hi = (uint16_t)(parent_cluster >> 16);
+    dotdot->cluster_lo = (uint16_t)(parent_cluster & 0xFFFF);
+
+    fat32_write_cluster(fs, new_cluster, cbuf);
+    kfree(cbuf);
+
+    /* Write the directory entry in the parent */
+    int idx = fat32_find_free_dirent(fs, parent_cluster);
+    if (idx < 0) { fat32_free_chain(fs, new_cluster); return idx; }
+
+    fat32_dirent_t de;
+    memset(&de, 0, sizeof(de));
+    fat32_str_to_83(name, de.name, de.ext);
+    de.attr      = FAT_ATTR_DIR;
+    de.cluster_hi = (uint16_t)(new_cluster >> 16);
+    de.cluster_lo = (uint16_t)(new_cluster & 0xFFFF);
+
+    int r = fat32_write_dirent_at(fs, parent_cluster, (uint32_t)idx, &de);
+    if (r != 0) { fat32_free_chain(fs, new_cluster); return r; }
+    fat32_sync(fs);
+    return 0;
+}
+
+static int _fat32_vfs_unlink(vfs_node_t* parent_vnode, const char* name)
+{
+    fat32_node_ctx_t* pctx = (fat32_node_ctx_t*)parent_vnode->impl;
+    fat32_fs_t* fs = pctx->fs;
+
+    uint32_t dir_cluster = (parent_vnode->inode >= 2)
+                           ? (uint32_t)parent_vnode->inode : fs->root_cluster;
+
+    size_t   bpc  = fs->bytes_per_cluster;
+    uint32_t epc  = bpc / 32;
+    uint8_t* cbuf = (uint8_t*)kmalloc(bpc);
+    if (!cbuf) return -ENOMEM;
+
+    uint32_t c    = dir_cluster;
+    uint32_t cnum = 0;
+
+    while (c >= 2 && c < FAT32_EOC_MIN) {
+        if (fat32_read_cluster(fs, c, cbuf) != 0) { kfree(cbuf); return -EIO; }
+        for (uint32_t i = 0; i < epc; i++) {
+            fat32_dirent_t* de = (fat32_dirent_t*)(cbuf + i * 32);
+            if (de->name[0] == 0x00) { kfree(cbuf); return -ENOENT; }
+            if ((uint8_t)de->name[0] == 0xE5) continue;
+            if (de->attr == FAT_ATTR_LFN) continue;
+            if (de->attr & (FAT_ATTR_SYSTEM | FAT_ATTR_VOLUME_ID)) continue;
+
+            char fname[13];
+            fat32_83_to_str(de, fname);
+            if (strcmp(fname, name) == 0) {
+                uint32_t fc = ((uint32_t)de->cluster_hi << 16) | de->cluster_lo;
+                if (fc >= 2) fat32_free_chain(fs, fc);
+                de->name[0] = (uint8_t)0xE5;  /* mark deleted */
+                fat32_write_cluster(fs, c, cbuf);
+                kfree(cbuf);
+                fat32_sync(fs);
+                return 0;
+            }
+        }
+        c = fat32_next_cluster(fs, c);
+        cnum++;
+    }
+
+    kfree(cbuf);
+    return -ENOENT;
+}
 
 /* ── Mount ───────────────────────────────────────────────────────────── */
 
@@ -614,13 +891,20 @@ int fat32_init(fat32_fs_t* fs, int dev, int lba_start, const char* mount_point)
           dev, mount_point, fs->total_clusters, fs->bytes_per_cluster);
 
     /* Create a VFS root node for this filesystem and register it */
-    vfs_node_t* root = (vfs_node_t*)kmalloc(sizeof(vfs_node_t));
-    if (!root) return -ENOMEM;
-    memset(root, 0, sizeof(*root));
+    fat32_node_ctx_t* root_ctx = (fat32_node_ctx_t*)kmalloc(sizeof(fat32_node_ctx_t));
+    vfs_node_t*       root     = (vfs_node_t*)kmalloc(sizeof(vfs_node_t));
+    if (!root_ctx || !root) { kfree(root_ctx); kfree(root); return -ENOMEM; }
+    memset(root,     0, sizeof(*root));
+    memset(root_ctx, 0, sizeof(*root_ctx));
+
+    root_ctx->fs          = fs;
+    root_ctx->dir_cluster = fs->root_cluster; /* parent of root is itself */
+    root_ctx->dirent_idx  = (uint32_t)-1;     /* no directory entry to write back */
+
     strncpy(root->name, "/", VFS_NAME_MAX);
     root->flags = VFS_DIRECTORY;
-    root->inode = 0;          /* 0 = use fs->root_cluster in ops */
-    root->impl  = (void*)fs;
+    root->inode = 0;          /* 0 triggers use of fs->root_cluster in ops */
+    root->impl  = (void*)root_ctx;
     root->ops   = (vfs_ops_t*)&fat32_vfs_ops;
 
     vfs_mount(mount_point, root, fs);
