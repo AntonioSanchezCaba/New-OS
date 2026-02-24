@@ -133,3 +133,15 @@ const apkg_catalog_t* apkg_catalog_get(int idx);
 
 /* CRC32 helper */
 uint32_t apkg_crc32(const void* data, size_t len);
+
+/*
+ * apkg_exec — launch a package's ELF payload as a new user-space process.
+ *
+ * Looks up @name in the installed DB + catalog, reads the .apkg payload,
+ * validates it as a statically-linked ELF64 executable, creates a process,
+ * loads all PT_LOAD segments, maps a user stack, and enqueues the process
+ * with the scheduler.
+ *
+ * Returns the new process's PID on success, -1 on error.
+ */
+pid_t apkg_exec(const char* name);

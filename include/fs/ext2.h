@@ -1,8 +1,10 @@
 /*
- * include/fs/ext2.h - Read-only EXT2 filesystem driver
+ * include/fs/ext2.h - EXT2 filesystem driver (read/write)
  *
  * Parses an EXT2 image (ramdisk or ATA block device) and mounts it
- * as a VFS subtree.  Only read operations are supported in this revision.
+ * as a VFS subtree.  Supports full read/write access: file creation,
+ * writes, directory creation, and unlinking.  All mutations are applied
+ * directly to the in-memory image (fs->data pointer).
  *
  * EXT2 layout (block size B, typically 1024 or 4096):
  *   Block 0          : boot sector (unused by us)

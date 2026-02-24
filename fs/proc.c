@@ -138,7 +138,7 @@ static int gen_meminfo(char* buf, int sz)
 static int gen_version(char* buf, int sz)
 {
     return snprintf(buf, (size_t)sz,
-        "%s version " OS_VERSION " (" OS_BUILD_DATE ")\n", OS_NAME);
+        "%s version " OS_VERSION " (" __DATE__ ")\n", OS_NAME);
 }
 
 static int gen_pid_status(char* buf, int sz, pid_t pid)

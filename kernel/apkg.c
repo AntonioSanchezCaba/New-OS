@@ -2,20 +2,24 @@
  * kernel/apkg.c — AetherOS Package Format (.apkg) implementation
  *
  * Manages installed package records in an in-memory database (max 64 entries).
- * Validates package headers, checks dependencies, verifies CRC32, and records
- * installs.  Persists the DB as a plain-text CSV via VFS at /sys/pkg/db.
+ * Validates package headers, checks dependencies, verifies CRC32, records
+ * installs, and executes ELF payloads via apkg_exec().
  *
- * The payload execution model for this milestone:
- *   In-kernel apps are compiled directly into the kernel binary, so payload
- *   bytes are not executed here.  apkg_install() validates, records, and
- *   returns success so the GUI package manager can track state.  A future
- *   user-space ELF loader will execute ring-3 payloads.
+ * Execution model:
+ *   apkg_exec() reads the .apkg payload, validates it as a statically-linked
+ *   ELF64 binary, creates a user-space process, maps all PT_LOAD segments,
+ *   allocates a user stack, and hands it to the scheduler.  Built-in ARE
+ *   surfaces are still linked directly into the kernel; apkg_exec() is for
+ *   packages distributed as .apkg files containing ELF payloads.
  */
 #include <kernel/apkg.h>
 #include <fs/vfs.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
+#include <elf.h>
+#include <process.h>
+#include <scheduler.h>
 
 /* =========================================================
  * CRC32 (ISO 3309 / Ethernet polynomial 0xEDB88320)
@@ -88,13 +92,13 @@ int apkg_repo_scan(const char* dir_path)
 
     int added = 0;
     uint32_t idx = 0;
-    vfs_dirent_t* de;
+    vfs_dirent_t de;
 
-    while ((de = vfs_readdir(dir, idx++)) != NULL) {
+    while (vfs_readdir(dir, idx++, &de) == 0) {
         /* Only process names ending in ".apkg" */
-        size_t nlen = strlen(de->name);
+        size_t nlen = strlen(de.name);
         if (nlen < 6 ||
-            strcmp(de->name + nlen - 5, ".apkg") != 0)
+            strcmp(de.name + nlen - 5, ".apkg") != 0)
             continue;
 
         if (g_catalog_count >= APKG_CATALOG_MAX)
@@ -107,7 +111,7 @@ int apkg_repo_scan(const char* dir_path)
             continue;
         memcpy(fpath, dir_path, dlen);
         fpath[dlen] = '/';
-        memcpy(fpath + dlen + 1, de->name, nlen + 1);
+        memcpy(fpath + dlen + 1, de.name, nlen + 1);
 
         /* Open and read the 256-byte header */
         vfs_node_t* fnode = vfs_open(fpath, VFS_O_READ);
@@ -456,4 +460,159 @@ void apkg_load(void)
     }
 
     kinfo("APKG: loaded %d package records from DB", g_db_count);
+}
+
+/* =========================================================
+ * ELF payload execution
+ * ========================================================= */
+
+/*
+ * User-space stack layout for launched processes.
+ * We reserve USER_STACK_PAGES pages just below USER_STACK_TOP.
+ */
+#define APKG_USER_STACK_TOP   0x7FFFFFFFF000ULL
+#define APKG_USER_STACK_PAGES 8
+
+/*
+ * apkg_exec — launch the ELF payload of an installed package.
+ *
+ * Steps:
+ *   1. Find the installed package record to get its name.
+ *   2. Locate the .apkg file path from the catalog.
+ *   3. Read the file into a heap buffer.
+ *   4. Locate the payload region (past header + dep table).
+ *   5. Validate the payload as ELF64 x86_64 exec.
+ *   6. Create a new user-space process.
+ *   7. Load all PT_LOAD segments via elf_load().
+ *   8. Allocate and map a user stack.
+ *   9. Set up the initial CPU context.
+ *  10. Enqueue with the scheduler.
+ *
+ * Returns the new PID on success, -1 on error.
+ */
+pid_t apkg_exec(const char* name)
+{
+    if (!name) return -1;
+
+    /* 1. Verify it's installed */
+    const apkg_record_t* rec = apkg_find(name);
+    if (!rec) {
+        klog_warn("APKG exec: '%s' is not installed", name);
+        return -1;
+    }
+
+    /* 2. Find .apkg file path in catalog */
+    const apkg_catalog_t* ce = NULL;
+    for (int i = 0; i < g_catalog_count; i++) {
+        if (strncmp(g_catalog[i].name, name, APKG_NAME_LEN) == 0) {
+            ce = &g_catalog[i];
+            break;
+        }
+    }
+    if (!ce) {
+        klog_warn("APKG exec: '%s' not found in catalog (no .apkg path)", name);
+        return -1;
+    }
+
+    /* 3. Open and read the entire .apkg file */
+    vfs_node_t* fnode = vfs_open(ce->path, VFS_O_READ);
+    if (!fnode) {
+        klog_warn("APKG exec: cannot open '%s'", ce->path);
+        return -1;
+    }
+
+    /* Determine file size */
+    size_t file_size = 0;
+    {
+        char probe[512];
+        ssize_t r;
+        while ((r = vfs_read(fnode, (off_t)file_size, sizeof(probe), probe)) > 0)
+            file_size += (size_t)r;
+    }
+    if (file_size < sizeof(apkg_header_t)) {
+        vfs_close(fnode);
+        return -1;
+    }
+
+    uint8_t* buf = (uint8_t*)kmalloc(file_size);
+    if (!buf) { vfs_close(fnode); return -1; }
+
+    ssize_t nr = vfs_read(fnode, 0, file_size, buf);
+    vfs_close(fnode);
+    if (nr < (ssize_t)file_size) { kfree(buf); return -1; }
+
+    /* 4. Locate payload region */
+    const apkg_header_t* hdr = (const apkg_header_t*)buf;
+    if (memcmp(hdr->magic, APKG_MAGIC, APKG_MAGIC_LEN) != 0) {
+        kfree(buf);
+        return -1;
+    }
+
+    size_t payload_off  = sizeof(apkg_header_t)
+                        + (size_t)hdr->dep_count * sizeof(apkg_dep_t);
+    size_t payload_size = hdr->payload_size;
+
+    if (payload_size == 0 || payload_off + payload_size > file_size) {
+        klog_warn("APKG exec: '%s' has no executable payload", name);
+        kfree(buf);
+        return -1;
+    }
+
+    const uint8_t* payload = buf + payload_off;
+
+    /* 5. Validate as ELF64 x86_64 executable */
+    if (!elf_validate(payload, payload_size)) {
+        klog_warn("APKG exec: '%s' payload is not a valid ELF64 binary", name);
+        kfree(buf);
+        return -1;
+    }
+
+    /* 6. Create user-space process (entry=NULL; we set context after ELF load) */
+    process_t* proc = process_create(rec->name, NULL, false);
+    if (!proc) {
+        klog_warn("APKG exec: failed to create process for '%s'", name);
+        kfree(buf);
+        return -1;
+    }
+
+    /* 7. Load ELF segments into the process address space */
+    uint64_t entry_vaddr = 0;
+    if (elf_load(proc, payload, payload_size, &entry_vaddr) != 0) {
+        klog_warn("APKG exec: elf_load failed for '%s'", name);
+        kfree(buf);
+        /* process_exit cleans up address space */
+        process_exit(proc, -1);
+        return -1;
+    }
+    kfree(buf);
+
+    /* 8. Allocate and map user stack */
+    for (int i = 0; i < APKG_USER_STACK_PAGES; i++) {
+        void* phys = pmm_alloc_frame();
+        if (!phys) {
+            klog_warn("APKG exec: out of memory for stack");
+            process_exit(proc, -1);
+            return -1;
+        }
+        memset(PHYS_TO_VIRT(phys), 0, PAGE_SIZE);
+        uint64_t vaddr = APKG_USER_STACK_TOP - (uint64_t)(i + 1) * PAGE_SIZE;
+        vmm_map_page(proc->address_space, vaddr, (uint64_t)phys,
+                     PTE_PRESENT | PTE_WRITABLE | PTE_USER | PTE_NX);
+    }
+    proc->user_stack = APKG_USER_STACK_TOP;
+
+    /* 9. Set up initial CPU context for ring-3 entry */
+    proc->context.rip    = entry_vaddr;
+    proc->context.rsp    = APKG_USER_STACK_TOP - 8;  /* 16-byte aligned - 8 */
+    proc->context.rflags = 0x202;   /* IF=1, reserved bit 1 */
+    proc->context.cs     = 0x23;    /* user code segment (ring 3) */
+    proc->context.ss     = 0x1B;    /* user data segment (ring 3) */
+    proc->state          = PROC_STATE_READY;
+
+    /* 10. Hand to scheduler */
+    scheduler_add(proc);
+
+    kinfo("APKG exec: launched '%s' (pid=%d, entry=0x%llx)",
+          name, proc->pid, (unsigned long long)entry_vaddr);
+    return proc->pid;
 }
