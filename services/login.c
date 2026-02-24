@@ -13,6 +13,7 @@
 #include <drivers/timer.h>
 #include <drivers/mouse.h>
 #include <scheduler.h>
+#include <kernel/users.h>
 #include <string.h>
 #include <memory.h>
 
@@ -184,8 +185,11 @@ static void draw_login_screen(canvas_t* screen)
 
 static bool try_login(void)
 {
-    /* v0.1: accept any non-empty username + any password */
     if (g_fields[FIELD_USER].len < 1) return false;
+    /* Authenticate against the user database */
+    int uid = users_authenticate(g_fields[FIELD_USER].buf,
+                                  g_fields[FIELD_PASS].buf);
+    if (uid < 0) return false;
     strncpy(login_username, g_fields[FIELD_USER].buf, 63);
     login_username[63] = '\0';
     return true;
