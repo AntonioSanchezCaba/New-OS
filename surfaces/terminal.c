@@ -18,6 +18,7 @@
 #include <kernel.h>
 #include <kernel/version.h>
 #include <scheduler.h>
+#include <drivers/timer.h>
 
 /* =========================================================
  * Terminal geometry
@@ -213,6 +214,9 @@ static void shell_exec(const char* cmd)
         term_puts("  mkdir dir — create directory\r\n");
         term_puts("  touch f   — create empty file\r\n");
         term_puts("  rm f      — remove file\r\n");
+        term_puts("  cp s d    — copy file\r\n");
+        term_puts("  uptime    — show system uptime\r\n");
+        term_puts("  mem       — show heap memory usage\r\n");
         term_puts("  reboot    — reboot system\r\n");
         term_puts("  halt      — halt system\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
@@ -327,6 +331,56 @@ static void shell_exec(const char* cmd)
             term_puts("rm: failed: ");
             term_puts(rmpath);
             term_puts("\r\n");
+        }
+    } else if (strcmp(cmd, "uptime") == 0) {
+        uint64_t secs = timer_get_ticks() / TIMER_FREQ;
+        uint64_t mins = secs / 60;
+        uint64_t hrs  = mins / 60;
+        secs %= 60; mins %= 60;
+        char ubuf[48];
+        snprintf(ubuf, sizeof(ubuf), "up %llu:%02llu:%02llu\r\n",
+                 (unsigned long long)hrs, (unsigned long long)mins,
+                 (unsigned long long)secs);
+        term_puts(ubuf);
+    } else if (strcmp(cmd, "mem") == 0) {
+        size_t used = kheap_used() / 1024;
+        size_t free_mem = kheap_free() / 1024;
+        char mbuf[64];
+        snprintf(mbuf, sizeof(mbuf), "heap: %u KB used, %u KB free\r\n",
+                 (unsigned)used, (unsigned)free_mem);
+        term_puts(mbuf);
+    } else if (strncmp(cmd, "cp ", 3) == 0) {
+        /* cp <src> <dst> */
+        const char* sp = cmd + 3;
+        const char* ep = sp;
+        while (*ep && *ep != ' ') ep++;
+        if (!*ep) {
+            term_puts("usage: cp <src> <dst>\r\n");
+        } else {
+            char src[VFS_NAME_MAX + 1], dst[VFS_NAME_MAX + 1];
+            int sl = (int)(ep - sp);
+            if (sl >= VFS_NAME_MAX) sl = VFS_NAME_MAX - 1;
+            memcpy(src, sp, (size_t)sl); src[sl] = '\0';
+            term_make_path(src, src, sizeof(src));
+            term_make_path(ep + 1, dst, sizeof(dst));
+            vfs_node_t* sf = vfs_resolve_path(src);
+            if (!sf || (sf->flags & VFS_DIRECTORY)) {
+                term_puts("cp: source not found or is directory\r\n");
+            } else {
+                vfs_create(dst, 0644);
+                vfs_node_t* df = vfs_resolve_path(dst);
+                if (!df) {
+                    term_puts("cp: cannot create destination\r\n");
+                } else {
+                    char cpbuf[512]; off_t off = 0; ssize_t n;
+                    df->size = 0;  /* truncate dst */
+                    while ((n = vfs_read(sf, off, sizeof(cpbuf), cpbuf)) > 0) {
+                        vfs_write(df, off, (size_t)n, cpbuf);
+                        off += n;
+                    }
+                    term_puts("cp: done\r\n");
+                }
+            }
         }
     } else if (strcmp(cmd, "reboot") == 0) {
         term_puts("Rebooting...\r\n");
