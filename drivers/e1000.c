@@ -292,9 +292,10 @@ int e1000_init(void)
     kinfo("e1000: initialized, link %s",
           (e1000_read(E1000_STATUS) & 0x2) ? "up" : "down");
 
-    /* Publish MAC to network stack */
+    /* Publish MAC and callbacks to network stack */
     memcpy(net_iface.mac.b, e1000_mac.b, 6);
     net_iface.send = e1000_send;
+    net_iface.poll = e1000_receive_poll;  /* Used by TCP/UDP spin-wait loops */
     net_iface.up   = true;
 
     return 0;

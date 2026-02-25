@@ -28,14 +28,16 @@ typedef struct {
 #define TCP_ACK  0x10
 #define TCP_URG  0x20
 
-/* Simple TCP socket state machine */
+/* TCP socket state machine (RFC 793 §3.2) */
 typedef enum {
-    TCP_CLOSED = 0,
-    TCP_SYN_SENT,
-    TCP_ESTABLISHED,
-    TCP_FIN_WAIT,
-    TCP_CLOSE_WAIT,
-    TCP_TIME_WAIT,
+    TCP_CLOSED     = 0,
+    TCP_LISTEN,        /* Passive open: waiting for SYN               */
+    TCP_SYN_RCVD,      /* Got SYN, sent SYN-ACK, waiting for final ACK */
+    TCP_SYN_SENT,      /* Active open: SYN sent, waiting for SYN-ACK  */
+    TCP_ESTABLISHED,   /* Full duplex data transfer                   */
+    TCP_FIN_WAIT,      /* Active close: FIN sent, waiting for ACK     */
+    TCP_CLOSE_WAIT,    /* Passive close: FIN received, ACK sent       */
+    TCP_TIME_WAIT,     /* Waiting for 2×MSL before CLOSED             */
 } tcp_state_t;
 
 #define TCP_MAX_SOCKETS 16
@@ -58,7 +60,18 @@ typedef struct {
 
 /* TCP API */
 void tcp_init(void);
+
+/* Active open — sends SYN, waits for SYN-ACK.
+ * Returns socket index ≥ 0 on success, -1 on timeout/error. */
 int  tcp_connect(ip4_addr_t ip, uint16_t port);
+
+/* Passive open — marks a TCP socket slot as LISTEN on @port.
+ * The socket layer calls this when sock_listen() is invoked.
+ * Returns socket index ≥ 0 on success, -1 if no free slot.
+ * Incoming SYNs on @port cause a child socket to be created and
+ * sock_notify_accept() to be called when the handshake completes. */
+int  tcp_listen(uint16_t port);
+
 int  tcp_send(int sock, const void* data, size_t len);
 int  tcp_recv(int sock, void* buf, size_t len);
 void tcp_close(int sock);

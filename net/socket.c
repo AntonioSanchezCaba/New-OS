@@ -105,11 +105,7 @@ int sock_create(int domain, int type, int protocol)
     s->tcp_sock   = -1;
     s->owner      = current_process ? current_process->pid : 0;
 
-    /* For TCP sockets allocate an underlying TCP socket */
-    if (type == SOCK_STREAM && domain == AF_INET) {
-        s->tcp_sock = tcp_connect(0, 0); /* Will be properly set on connect */
-        /* Just allocate the slot for now */
-    }
+    /* tcp_sock stays -1; it is allocated on connect() or listen() */
 
     kdebug("Socket: created sd=%d domain=%d type=%d", sd, domain, type);
     return sd;
@@ -175,7 +171,24 @@ int sock_listen(int sd, int backlog)
     if (backlog > SOCK_BACKLOG_MAX) backlog = SOCK_BACKLOG_MAX;
     s->backlog_size = backlog;
     s->state        = SOCK_STATE_LISTENING;
-    kdebug("Socket: sd=%d listening (backlog=%d)", sd, backlog);
+
+    /* Tell the TCP layer to park a LISTEN slot on this port so that
+     * incoming SYNs are handled and sock_notify_accept() is called. */
+    uint16_t port = ntohs(s->local.sin_port);
+    if (port == 0) {
+        /* Assign ephemeral port if none bound yet */
+        port = sock_ephemeral_port();
+        s->local.sin_port = htons(port);
+    }
+    int tcp_slot = tcp_listen(port);
+    if (tcp_slot < 0) {
+        s->state = SOCK_STATE_BOUND;
+        return -EADDRINUSE;
+    }
+    s->tcp_sock = tcp_slot;
+
+    kdebug("Socket: sd=%d listening on port %u (backlog=%d tcp_slot=%d)",
+           sd, port, backlog, tcp_slot);
     return 0;
 }
 

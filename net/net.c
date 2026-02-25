@@ -6,6 +6,7 @@
 #include <net/ip.h>
 #include <net/tcp.h>
 #include <net/udp.h>
+#include <net/socket.h>
 #include <kernel.h>
 #include <string.h>
 #include <memory.h>
@@ -99,6 +100,7 @@ void net_init(void)
     ip4_init();
     tcp_init();
     udp_init();
+    socket_init();
     kinfo("Net: stack initialized (IP %u.%u.%u.%u)",
           (net_iface.ip >>  0) & 0xFF,
           (net_iface.ip >>  8) & 0xFF,
