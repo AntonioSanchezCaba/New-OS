@@ -6,6 +6,7 @@
  * and generates GUI mouse events.
  */
 #include <drivers/mouse.h>
+#include <drivers/cursor.h>
 #include <drivers/framebuffer.h>
 #include <drivers/keyboard.h>
 #include <gui/event.h>
@@ -28,16 +29,20 @@
 #define MOUSE_CMD_SET_SAMPLE    0xF3
 #define MOUSE_CMD_ENABLE        0xF4
 #define MOUSE_CMD_SET_DEFAULTS  0xF6
+#define MOUSE_CMD_GET_ID        0xF2
 #define MOUSE_CMD_RESET         0xFF
 #define MOUSE_ACK               0xFA
 
-mouse_state_t mouse = { .x = 400, .y = 300, .buttons = 0 };
+mouse_state_t mouse = { .x = 400, .y = 300, .buttons = 0, .scroll = 0 };
 
 static int  max_x = 1023;
 static int  max_y = 767;
 
-/* Packet accumulation: PS/2 mouse sends 3 bytes per movement */
-static uint8_t packet[3];
+/* IntelliMouse: true when scroll wheel detected (4-byte packets) */
+static bool scroll_enabled = false;
+
+/* Packet accumulation: 3 bytes (standard) or 4 bytes (IntelliMouse) */
+static uint8_t packet[4];
 static int     packet_idx = 0;
 
 /* Write to PS/2 data port, with status check */
@@ -100,6 +105,26 @@ void mouse_init(void)
     ps2_write_mouse(MOUSE_CMD_SET_DEFAULTS);
     ps2_read(); /* ACK */
 
+    /*
+     * IntelliMouse scroll-wheel detection (Microsoft PS/2 IntelliMouse spec):
+     * Send sample rates 200, 100, 80 in sequence, then read Device ID.
+     * A standard mouse returns ID=0x00; an IntelliMouse returns ID=0x03.
+     * On success the mouse sends 4-byte packets where byte[3] is the Z-axis.
+     */
+    ps2_write_mouse(MOUSE_CMD_SET_SAMPLE); ps2_read(); /* ACK */
+    ps2_write_mouse(200);                  ps2_read(); /* ACK */
+    ps2_write_mouse(MOUSE_CMD_SET_SAMPLE); ps2_read(); /* ACK */
+    ps2_write_mouse(100);                  ps2_read(); /* ACK */
+    ps2_write_mouse(MOUSE_CMD_SET_SAMPLE); ps2_read(); /* ACK */
+    ps2_write_mouse(80);                   ps2_read(); /* ACK */
+
+    ps2_write_mouse(MOUSE_CMD_GET_ID);
+    ps2_read(); /* ACK */
+    uint8_t mouse_id = ps2_read();
+    scroll_enabled = (mouse_id == 0x03 || mouse_id == 0x04);
+    kinfo("PS/2 mouse ID=0x%02X scroll=%s", mouse_id,
+          scroll_enabled ? "yes" : "no");
+
     /* Enable data reporting */
     ps2_write_mouse(MOUSE_CMD_ENABLE);
     ps2_read(); /* ACK */
@@ -109,8 +134,10 @@ void mouse_init(void)
 
     mouse.x = max_x / 2;
     mouse.y = max_y / 2;
+    cursor_move(mouse.x, mouse.y);  /* Sync cursor to initial mouse position */
 
-    kinfo("PS/2 mouse initialized");
+    kinfo("PS/2 mouse initialized (%s)",
+          scroll_enabled ? "IntelliMouse w/scroll" : "standard 3-button");
 }
 
 void mouse_set_bounds(int mx, int my)
@@ -121,7 +148,7 @@ void mouse_set_bounds(int mx, int my)
 
 /*
  * mouse_irq_handler - called on every IRQ 12.
- * Accumulates 3-byte packets and posts GUI events.
+ * Accumulates 3-byte (standard) or 4-byte (IntelliMouse) packets.
  */
 void mouse_irq_handler(void* regs)
 {
@@ -130,10 +157,11 @@ void mouse_irq_handler(void* regs)
     uint8_t data = inb(PS2_DATA);
     packet[packet_idx++] = data;
 
-    if (packet_idx < 3) return;
+    int packet_size = scroll_enabled ? 4 : 3;
+    if (packet_idx < packet_size) return;
     packet_idx = 0;
 
-    /* Decode the 3-byte packet */
+    /* Decode the packet */
     uint8_t flags = packet[0];
 
     /* Discard if overflow bits are set */
@@ -151,6 +179,15 @@ void mouse_irq_handler(void* regs)
     mouse.dx = dx;
     mouse.dy = dy;
 
+    /* Decode scroll wheel (IntelliMouse byte 4: signed 4-bit Z-axis) */
+    if (scroll_enabled) {
+        int8_t z = (int8_t)(packet[3] & 0x0F);
+        if (packet[3] & 0x08) z |= (int8_t)0xF0;  /* Sign-extend from 4 bits */
+        mouse.scroll = (z < 0) ? -1 : (z > 0) ? 1 : 0;
+    } else {
+        mouse.scroll = 0;
+    }
+
     mouse.x += dx;
     mouse.y += dy;
 
@@ -159,6 +196,9 @@ void mouse_irq_handler(void* regs)
     if (mouse.y < 0)      mouse.y = 0;
     if (mouse.x > max_x)  mouse.x = max_x;
     if (mouse.y > max_y)  mouse.y = max_y;
+
+    /* Sync software cursor sprite to new position immediately */
+    cursor_move(mouse.x, mouse.y);
 
     /* Post event to GUI queue */
     gui_post_mouse(mouse.x, mouse.y, dx, dy, mouse.buttons);

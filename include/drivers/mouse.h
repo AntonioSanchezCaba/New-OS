@@ -17,6 +17,7 @@ typedef struct {
     int     dx, dy;        /* Delta since last update */
     uint8_t buttons;       /* Button bitmask */
     uint8_t prev_buttons;  /* Previous buttons (for click detection) */
+    int8_t  scroll;        /* Scroll wheel delta: +1 up, -1 down, 0 none */
 } mouse_state_t;
 
 extern mouse_state_t mouse;

@@ -129,14 +129,15 @@ void input_poll(void)
 
     /* --- Mouse --- */
     {
-        int prev_buttons = g_ptr_buttons;
-        int mx = mouse.x, my = mouse.y;
-        int dx = mx - g_ptr.x, dy = my - g_ptr.y;
+        int    prev_buttons = g_ptr_buttons;
+        int    mx = mouse.x, my = mouse.y;
+        int    dx = mx - g_ptr.x, dy = my - g_ptr.y;
+        int8_t scroll = mouse.scroll;
         g_ptr_buttons = mouse.buttons;
         g_ptr.x = mx;
         g_ptr.y = my;
 
-        if (dx || dy || g_ptr_buttons != prev_buttons) {
+        if (dx || dy || g_ptr_buttons != (uint8_t)prev_buttons || scroll) {
             input_event_t ev;
             ev.type                 = INPUT_POINTER;
             ev.pointer.x            = mx;
@@ -145,7 +146,7 @@ void input_poll(void)
             ev.pointer.dy           = dy;
             ev.pointer.buttons      = g_ptr_buttons;
             ev.pointer.prev_buttons = (uint8_t)prev_buttons;
-            ev.pointer.scroll       = 0;
+            ev.pointer.scroll       = scroll;
             queue_push(&ev);
         }
     }
