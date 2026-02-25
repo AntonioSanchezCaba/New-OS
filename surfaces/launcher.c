@@ -47,6 +47,11 @@
 /* Forward declarations for floating-window apps */
 extern sid_t surface_calculator_open(void);
 extern sid_t surface_clock_open(void);
+extern sid_t surface_netconfig_open(void);
+extern sid_t surface_imgviewer_open(const char* path);
+
+/* No-arg launcher wrapper for imgviewer (opens without preloaded image) */
+static sid_t launch_imgviewer(void) { return surface_imgviewer_open(NULL); }
 
 /* =========================================================
  * App entries
@@ -70,8 +75,10 @@ static const launcher_app_t g_apps[] = {
     { "Settings",    "S",  ACOLOR(0x60, 0x40, 0x20, 0xFF), 3,  NULL                    },
     { "Calculator",  "Cx", ACOLOR(0x40, 0x60, 0x20, 0xFF), -1, surface_calculator_open },
     { "Clock",       "Cl", ACOLOR(0x20, 0x60, 0x60, 0xFF), -1, surface_clock_open      },
+    { "Network",     "Nw", ACOLOR(0x20, 0x50, 0x70, 0xFF), -1, surface_netconfig_open  },
+    { "Img Viewer",  "Iv", ACOLOR(0x50, 0x30, 0x70, 0xFF), -1, launch_imgviewer        },
 };
-#define LN_APP_COUNT  6
+#define LN_APP_COUNT  8
 
 /* =========================================================
  * State

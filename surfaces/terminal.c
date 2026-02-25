@@ -563,10 +563,11 @@ static void shell_exec(const char* cmd)
             }
         }
     } else if (strcmp(cmd, "date") == 0) {
-        /* Show uptime as a stand-in for wall-clock time */
-        uint32_t t = timer_get_ticks();
-        uint32_t ss = t / 1000, mm = ss / 60, hh = mm / 60;
-        ss %= 60; mm %= 60; hh %= 24;
+        /* Show uptime HH:MM:SS (TIMER_FREQ ticks per second) */
+        uint32_t total_s = timer_get_ticks() / TIMER_FREQ;
+        uint32_t hh = total_s / 3600;
+        uint32_t mm = (total_s % 3600) / 60;
+        uint32_t ss = total_s % 60;
         char dbuf[48];
         snprintf(dbuf, sizeof(dbuf), "Uptime: %02u:%02u:%02u\r\n", hh, mm, ss);
         term_puts(dbuf);
