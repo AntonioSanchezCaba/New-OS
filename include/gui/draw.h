@@ -32,6 +32,14 @@ void draw_pixel(canvas_t* c, int x, int y, uint32_t color);
 /* Filled rectangle */
 void draw_rect(canvas_t* c, int x, int y, int w, int h, uint32_t color);
 
+/* Filled rectangle with per-pixel alpha blend (uses color's alpha channel) */
+void draw_rect_alpha(canvas_t* c, int x, int y, int w, int h, uint32_t color);
+
+/* Clear entire canvas to a solid color */
+static inline void draw_clear(canvas_t* c, uint32_t color) {
+    draw_rect(c, 0, 0, c->width, c->height, color);
+}
+
 /* Outlined rectangle */
 void draw_rect_outline(canvas_t* c, int x, int y, int w, int h,
                         int border, uint32_t color);

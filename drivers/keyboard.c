@@ -158,17 +158,17 @@ void keyboard_irq_handler(void* regs)
 
     /* Update modifier key state */
     switch (key) {
-        case KEY_LSHIFT:
-        case KEY_RSHIFT:
+        case KBD_SC_LSHIFT:
+        case KBD_SC_RSHIFT:
             kbd_state.shift_down = !released;
             return;
-        case KEY_LCTRL:
+        case KBD_SC_LCTRL:
             kbd_state.ctrl_down = !released;
             return;
-        case KEY_LALT:
+        case KBD_SC_LALT:
             kbd_state.alt_down = !released;
             return;
-        case KEY_CAPSLOCK:
+        case KBD_SC_CAPSLOCK:
             if (!released) {
                 kbd_state.caps_lock = !kbd_state.caps_lock;
             }
@@ -179,10 +179,10 @@ void keyboard_irq_handler(void* regs)
     int gui_kc = 0;
     char gui_ch = 0;
     switch (key) {
-        case KEY_ESCAPE:   gui_kc = 0x1B; gui_ch = 0x1B; break;
-        case KEY_ENTER:    gui_kc = '\n';  gui_ch = '\n'; break;
-        case KEY_BACKSPACE:gui_kc = '\b';  gui_ch = '\b'; break;
-        case KEY_TAB:      gui_kc = '\t';  gui_ch = '\t'; break;
+        case KBD_SC_ESCAPE:   gui_kc = 0x1B; gui_ch = 0x1B; break;
+        case KBD_SC_ENTER:    gui_kc = '\n';  gui_ch = '\n'; break;
+        case KBD_SC_BACKSPACE:gui_kc = '\b';  gui_ch = '\b'; break;
+        case KBD_SC_TAB:      gui_kc = '\t';  gui_ch = '\t'; break;
         /* F1–F12 (scan codes 0x3B–0x44, 0x57–0x58) */
         case 0x3B: gui_kc = 0x11B; break; /* F1  */
         case 0x3C: gui_kc = 0x11C; break; /* F2  */

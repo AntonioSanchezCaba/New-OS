@@ -11,31 +11,40 @@
 #define KBD_STATUS_PORT  0x64
 #define KBD_CMD_PORT     0x64
 
-/* Keyboard scancode set 1 special keys */
-#define KEY_ESCAPE    0x01
-#define KEY_BACKSPACE 0x0E
-#define KEY_TAB       0x0F
-#define KEY_ENTER     0x1C
-#define KEY_LCTRL     0x1D
-#define KEY_LSHIFT    0x2A
-#define KEY_RSHIFT    0x36
-#define KEY_LALT      0x38
-#define KEY_CAPSLOCK  0x3A
-#define KEY_F1        0x3B
-#define KEY_F2        0x3C
-#define KEY_F3        0x3D
-#define KEY_F4        0x3E
-#define KEY_F5        0x3F
-#define KEY_F6        0x40
-#define KEY_F7        0x41
-#define KEY_F8        0x42
-#define KEY_F9        0x43
-#define KEY_F10       0x44
-#define KEY_DELETE    0x53
-#define KEY_UP        0x48
-#define KEY_DOWN      0x50
-#define KEY_LEFT      0x4B
-#define KEY_RIGHT     0x4D
+/* PS/2 keyboard scancode set 1 values (raw hardware scan codes)
+ * Use KBD_SC_* in driver code that processes raw scan codes.
+ * GUI-level translated keycodes are in include/gui/event.h as KEY_*. */
+#define KBD_SC_ESCAPE    0x01
+#define KBD_SC_BACKSPACE 0x0E
+#define KBD_SC_TAB       0x0F
+#define KBD_SC_ENTER     0x1C
+#define KBD_SC_LCTRL     0x1D
+#define KBD_SC_LSHIFT    0x2A
+#define KBD_SC_RSHIFT    0x36
+#define KBD_SC_LALT      0x38
+#define KBD_SC_CAPSLOCK  0x3A
+#define KBD_SC_F1        0x3B
+#define KBD_SC_F2        0x3C
+#define KBD_SC_F3        0x3D
+#define KBD_SC_F4        0x3E
+#define KBD_SC_F5        0x3F
+#define KBD_SC_F6        0x40
+#define KBD_SC_F7        0x41
+#define KBD_SC_F8        0x42
+#define KBD_SC_F9        0x43
+#define KBD_SC_F10       0x44
+#define KBD_SC_DELETE    0x53
+#define KBD_SC_UP        0x48
+#define KBD_SC_DOWN      0x50
+#define KBD_SC_LEFT      0x4B
+#define KBD_SC_RIGHT     0x4D
+
+/* Modifier and non-printable scancodes (no gui/event.h conflict) */
+#define KBD_SC_LCTRL_VAL    KBD_SC_LCTRL
+#define KBD_SC_LSHIFT_VAL   KBD_SC_LSHIFT
+#define KBD_SC_RSHIFT_VAL   KBD_SC_RSHIFT
+#define KBD_SC_LALT_VAL     KBD_SC_LALT
+#define KBD_SC_CAPSLOCK_VAL KBD_SC_CAPSLOCK
 
 /* Key release flag: scancode | 0x80 */
 #define KEY_RELEASED  0x80
