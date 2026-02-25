@@ -38,6 +38,8 @@
 /* =========================================================
  * State
  * ========================================================= */
+#define STATUS_H  20   /* Status bar height in pixels */
+
 static bool     g_running  = false;
 static uint32_t g_screen_w = 0;
 static uint32_t g_screen_h = 0;
@@ -75,6 +77,60 @@ static void float_remove(sid_t sid)
             return;
         }
     }
+}
+
+/* =========================================================
+ * Status bar  —  drawn over everything, under the cursor
+ * Shows: active surface name (left) | uptime + frame count (right)
+ * ========================================================= */
+static void are_draw_statusbar(canvas_t* c)
+{
+    int bar_y = (int)c->height - STATUS_H;
+    if (bar_y < 0) return;
+
+    /* Background */
+    draw_rect(c, 0, bar_y, (int)c->width, STATUS_H,
+              ACOLOR(0x0A, 0x12, 0x28, 0xE8));
+
+    /* Separator line at top of bar */
+    draw_rect(c, 0, bar_y, (int)c->width, 1,
+              ACOLOR(0x30, 0x50, 0xA0, 0xFF));
+
+    /* Left: active surface name */
+    sid_t act = context_active();
+    const char* name = "AetherOS";
+    surface_t* as = surface_get(act);
+    if (as && as->title[0]) name = as->title;
+
+    draw_string(c, 8, bar_y + (STATUS_H - FONT_H) / 2,
+                name, ACOLOR(0xB0, 0xC8, 0xFF, 0xFF), ACOLOR(0,0,0,0));
+
+    /* Center: OS name */
+    const char* center_str = OS_NAME;
+    int cx = (int)c->width / 2 - (int)strlen(center_str) * FONT_W / 2;
+    draw_string(c, cx, bar_y + (STATUS_H - FONT_H) / 2,
+                center_str, ACOLOR(0x50, 0x70, 0xB0, 0xFF), ACOLOR(0,0,0,0));
+
+    /* Right: uptime HH:MM:SS */
+    uint32_t total_s  = timer_get_ticks() / TIMER_FREQ;
+    uint32_t hh = total_s / 3600;
+    uint32_t mm = (total_s % 3600) / 60;
+    uint32_t ss = total_s % 60;
+    char tbuf[16];
+    /* Build string manually (no sprintf in kernel) */
+    tbuf[0]  = '0' + (hh / 10) % 10;
+    tbuf[1]  = '0' + (hh      ) % 10;
+    tbuf[2]  = ':';
+    tbuf[3]  = '0' + (mm / 10) % 10;
+    tbuf[4]  = '0' + (mm      ) % 10;
+    tbuf[5]  = ':';
+    tbuf[6]  = '0' + (ss / 10) % 10;
+    tbuf[7]  = '0' + (ss      ) % 10;
+    tbuf[8]  = '\0';
+
+    int tx = (int)c->width - (int)strlen(tbuf) * FONT_W - 8;
+    draw_string(c, tx, bar_y + (STATUS_H - FONT_H) / 2,
+                tbuf, ACOLOR(0x80, 0xC0, 0xFF, 0xFF), ACOLOR(0,0,0,0));
 }
 
 /* Draw all floating windows over the composed back-buffer */
@@ -543,6 +599,9 @@ void are_run(void)
 
             /* 5b. Compose floating windows above field/overlays */
             are_compose_floats(&screen);
+
+            /* 5c. Draw status bar (below cursor, above everything else) */
+            are_draw_statusbar(&screen);
 
             /* 6. Render software cursor over the composed frame */
             cursor_erase();   /* restore pixels under old cursor position */

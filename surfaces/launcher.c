@@ -44,23 +44,34 @@
 #define LN_BORDER     ACOLOR(0x28, 0x38, 0x50, 0xFF)
 #define LN_CURSOR     ACOLOR(0x40, 0x90, 0xFF, 0xFF)
 
+/* Forward declarations for floating-window apps */
+extern sid_t surface_calculator_open(void);
+extern sid_t surface_clock_open(void);
+
 /* =========================================================
  * App entries
+ * field_slot >= 0: navigate to that ARE field slot.
+ * field_slot == -1: call launch() to open a SURF_FLOAT window.
  * ========================================================= */
+typedef sid_t (*app_launch_fn)(void);
+
 typedef struct {
-    const char* name;
-    const char* icon;   /* 1-3 char abbreviation */
-    acolor_t    color;  /* icon background tint */
-    int         field_slot; /* index in context's field[] to jump to */
+    const char*   name;
+    const char*   icon;       /* ≤3-char abbreviation shown in icon cell */
+    acolor_t      color;      /* icon background tint */
+    int           field_slot; /* >= 0: field nav; -1: use launch fn */
+    app_launch_fn launch;     /* used when field_slot == -1 */
 } launcher_app_t;
 
 static const launcher_app_t g_apps[] = {
-    { "Terminal",   "T",  ACOLOR(0x20, 0x40, 0x80, 0xFF), 0 },
-    { "Explorer",   "E",  ACOLOR(0x20, 0x70, 0x40, 0xFF), 1 },
-    { "Sys Monitor","M",  ACOLOR(0x70, 0x30, 0x80, 0xFF), 2 },
-    { "Settings",   "S",  ACOLOR(0x60, 0x40, 0x20, 0xFF), 3 },
+    { "Terminal",    "T",  ACOLOR(0x20, 0x40, 0x80, 0xFF), 0,  NULL                    },
+    { "Explorer",    "E",  ACOLOR(0x20, 0x70, 0x40, 0xFF), 1,  NULL                    },
+    { "Sys Monitor", "M",  ACOLOR(0x70, 0x30, 0x80, 0xFF), 2,  NULL                    },
+    { "Settings",    "S",  ACOLOR(0x60, 0x40, 0x20, 0xFF), 3,  NULL                    },
+    { "Calculator",  "Cx", ACOLOR(0x40, 0x60, 0x20, 0xFF), -1, surface_calculator_open },
+    { "Clock",       "Cl", ACOLOR(0x20, 0x60, 0x60, 0xFF), -1, surface_clock_open      },
 };
-#define LN_APP_COUNT  4
+#define LN_APP_COUNT  6
 
 /* =========================================================
  * State
@@ -253,8 +264,14 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
             g_ln.selected = g_ln.hover;
             are_pop_overlay();
             if (g_ln.selected < LN_APP_COUNT) {
-                /* Core surface: switch to existing field slot */
-                context_goto(g_apps[g_ln.selected].field_slot);
+                const launcher_app_t* app = &g_apps[g_ln.selected];
+                if (app->field_slot >= 0) {
+                    /* Navigate to existing field surface */
+                    context_goto(app->field_slot);
+                } else if (app->launch) {
+                    /* Open as floating window */
+                    app->launch();
+                }
             } else {
                 /* Installed package: launch via apkg_exec */
                 const apkg_record_t* pkg = apkg_get(g_ln.selected - LN_APP_COUNT);
@@ -277,7 +294,11 @@ static void ln_input(sid_t id, const input_event_t* ev, void* ud)
             if (g_ln.selected >= 0) {
                 are_pop_overlay();
                 if (g_ln.selected < LN_APP_COUNT) {
-                    context_goto(g_apps[g_ln.selected].field_slot);
+                    const launcher_app_t* app = &g_apps[g_ln.selected];
+                    if (app->field_slot >= 0)
+                        context_goto(app->field_slot);
+                    else if (app->launch)
+                        app->launch();
                 } else {
                     const apkg_record_t* pkg = apkg_get(g_ln.selected - LN_APP_COUNT);
                     if (pkg) apkg_exec(pkg->name);

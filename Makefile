@@ -179,6 +179,7 @@ C_SRCS := \
     kernel/tty.c                \
     kernel/pkg.c                \
     net/socket.c                \
+    net/udp.c                   \
     services/bootanim.c         \
     drivers/cursor.c            \
     drivers/uefi_gop.c          \
