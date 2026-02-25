@@ -271,3 +271,8 @@ sid_t surface_netconfig_open(void)
     surface_invalidate(g_nc.sid);
     return g_nc.sid;
 }
+
+/* Legacy GUI API stubs — never called when ARE is active */
+typedef int wid_t;
+wid_t app_netconfig_create(void) { surface_netconfig_open(); return -1; }
+void  netconfig_tick(void) {}

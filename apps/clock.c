@@ -240,3 +240,7 @@ sid_t surface_clock_open(void)
                                  clk_on_close, NULL);
     return g_clk.sid;
 }
+
+/* Legacy GUI API stubs — never called when ARE is active */
+void gui_launch_clock(void) { surface_clock_open(); }
+void clock_tick(void) {}

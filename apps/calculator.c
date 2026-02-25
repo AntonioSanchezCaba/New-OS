@@ -390,3 +390,6 @@ sid_t surface_calculator_open(void)
                                   calc_on_close, NULL);
     return g_calc.sid;
 }
+
+/* Legacy GUI API stubs — never called when ARE is active */
+void gui_launch_calculator(void) { surface_calculator_open(); }

@@ -28,14 +28,6 @@ typedef struct {
 #define TCP_ACK  0x10
 #define TCP_URG  0x20
 
-/* UDP header */
-typedef struct {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t length;
-    uint16_t checksum;
-} __attribute__((packed)) udp_hdr_t;
-
 /* Simple TCP socket state machine */
 typedef enum {
     TCP_CLOSED = 0,
@@ -71,14 +63,5 @@ int  tcp_send(int sock, const void* data, size_t len);
 int  tcp_recv(int sock, void* buf, size_t len);
 void tcp_close(int sock);
 void tcp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len);
-
-/* UDP API */
-int  udp_send(ip4_addr_t dst, uint16_t src_port, uint16_t dst_port,
-              const void* data, size_t len);
-void udp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len);
-
-/* Poll for an incoming UDP datagram on a local port.
- * Returns bytes copied into buf, or -1 if nothing available. */
-int  udp_recv_poll(uint16_t local_port, void* buf, int bufsz);
 
 #endif /* NET_TCP_H */

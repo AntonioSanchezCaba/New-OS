@@ -15,6 +15,7 @@
 #define NET_UDP_H
 
 #include <net/net.h>
+#include <net/ip.h>
 
 /* =========================================================
  * UDP header (RFC 768 — 8 bytes)
@@ -54,7 +55,7 @@ void udp_init(void);
  * data/len  : payload
  * Returns 0 on success, -1 on error. */
 int udp_send(ip4_addr_t dst_ip, uint16_t src_port, uint16_t dst_port,
-             const void* data, uint16_t len);
+             const void* data, size_t len);
 
 /* Register a per-port receive callback.
  * Multiple listeners on the same port are NOT supported (last wins).
@@ -65,7 +66,12 @@ int udp_listen(uint16_t port, udp_recv_cb cb, void* ctx);
 /* Called by ip4_receive() when a UDP packet arrives.
  * ip_hdr: pointer to the enclosing IPv4 header (for source IP).
  * payload/len: UDP header + data. */
-void udp_receive(const void* ip_hdr, const void* payload, uint16_t len);
+void udp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len);
+
+/* Poll for an incoming UDP datagram on a local port (non-blocking).
+ * Returns bytes copied into buf, or -1 if nothing available.
+ * Used by dhcp.c and dns.c for simple request/response. */
+int udp_recv_poll(uint16_t local_port, void* buf, int bufsz);
 
 /* Blocking receive helper (spins until data arrives or timeout).
  * Registers a temporary listener on port, waits up to timeout_ms.

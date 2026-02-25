@@ -101,11 +101,11 @@ int udp_listen(uint16_t port, udp_recv_cb cb, void* ctx)
  * ========================================================= */
 
 int udp_send(ip4_addr_t dst_ip, uint16_t src_port, uint16_t dst_port,
-             const void* data, uint16_t len)
+             const void* data, size_t len)
 {
     if (!net_iface.up) return -1;
 
-    uint16_t udp_len = (uint16_t)(sizeof(udp_hdr_t) + len);
+    size_t udp_len = sizeof(udp_hdr_t) + len;
 
     /* Allocate a temporary stack buffer for header + payload.
      * Maximum UDP payload is bounded by NET_BUF_SIZE in practice. */
@@ -116,7 +116,7 @@ int udp_send(ip4_addr_t dst_ip, uint16_t src_port, uint16_t dst_port,
 
     hdr->src_port = htons(src_port);
     hdr->dst_port = htons(dst_port);
-    hdr->length   = htons(udp_len);
+    hdr->length   = htons((uint16_t)udp_len);
     hdr->checksum = 0;          /* UDP checksum is optional (RFC 768) */
 
     if (data && len > 0)
@@ -150,11 +150,11 @@ static void udp_blocking_cb(ip4_addr_t src_ip, uint16_t src_port,
  * udp_receive  –  called by ip4_receive() for PROTO_UDP
  * ========================================================= */
 
-void udp_receive(const void* ip_hdr, const void* payload, uint16_t len)
+void udp_receive(const ip4_hdr_t* ip_hdr, const void* payload, size_t len)
 {
     if (len < sizeof(udp_hdr_t)) return;
 
-    const ip4_hdr_t* ip  = (const ip4_hdr_t*)ip_hdr;
+    const ip4_hdr_t* ip  = ip_hdr;
     const udp_hdr_t* hdr = (const udp_hdr_t*)payload;
 
     uint16_t dst_port  = ntohs(hdr->dst_port);
@@ -162,7 +162,7 @@ void udp_receive(const void* ip_hdr, const void* payload, uint16_t len)
     uint16_t udp_len   = ntohs(hdr->length);
 
     /* Validate declared length */
-    if (udp_len < sizeof(udp_hdr_t) || udp_len > len) return;
+    if (udp_len < (uint16_t)sizeof(udp_hdr_t) || (size_t)udp_len > len) return;
 
     const void*  data     = (const uint8_t*)payload + sizeof(udp_hdr_t);
     uint16_t     data_len = (uint16_t)(udp_len - sizeof(udp_hdr_t));
@@ -220,4 +220,74 @@ int udp_recv_blocking(uint16_t port, void* buf, uint16_t maxlen,
     int rxlen = (int)slot->rxlen;
     slot->port = 0;
     return rxlen;
+}
+
+/* =========================================================
+ * udp_recv_poll  –  non-blocking single-datagram check
+ *
+ * Used by dhcp.c and dns.c for simple request/response.
+ * Stores each incoming packet in a small ring buffer per port;
+ * returns -1 immediately if no packet is waiting.
+ * ========================================================= */
+
+#define UDP_POLL_SLOTS  8
+#define UDP_POLL_BUF_SZ 1500
+
+typedef struct {
+    uint16_t port;
+    bool     used;
+    int      len;
+    uint8_t  data[UDP_POLL_BUF_SZ];
+} udp_poll_slot_t;
+
+static udp_poll_slot_t g_poll_slots[UDP_POLL_SLOTS];
+static bool            g_poll_init = false;
+
+static void udp_poll_cb(ip4_addr_t src_ip, uint16_t src_port,
+                         const void* data, uint16_t len, void* ctx)
+{
+    (void)src_ip; (void)src_port;
+    udp_poll_slot_t* slot = (udp_poll_slot_t*)ctx;
+    if (slot->used) return;   /* Already has unread packet */
+    int copy_len = (len < UDP_POLL_BUF_SZ) ? len : UDP_POLL_BUF_SZ;
+    memcpy(slot->data, data, (size_t)copy_len);
+    slot->len  = copy_len;
+    slot->used = true;
+}
+
+int udp_recv_poll(uint16_t local_port, void* buf, int bufsz)
+{
+    if (!g_poll_init) {
+        memset(g_poll_slots, 0, sizeof(g_poll_slots));
+        g_poll_init = true;
+    }
+
+    /* Find or create a poll slot for this port */
+    udp_poll_slot_t* slot = NULL;
+    for (int i = 0; i < UDP_POLL_SLOTS; i++) {
+        if (g_poll_slots[i].port == local_port) {
+            slot = &g_poll_slots[i];
+            break;
+        }
+    }
+    if (!slot) {
+        /* Allocate a new slot and register callback */
+        for (int i = 0; i < UDP_POLL_SLOTS; i++) {
+            if (g_poll_slots[i].port == 0) {
+                slot = &g_poll_slots[i];
+                slot->port = local_port;
+                slot->used = false;
+                udp_listen(local_port, udp_poll_cb, slot);
+                break;
+            }
+        }
+    }
+    if (!slot) return -1;
+
+    if (!slot->used) return -1;   /* No packet waiting */
+
+    int n = (slot->len < bufsz) ? slot->len : bufsz;
+    memcpy(buf, slot->data, (size_t)n);
+    slot->used = false;
+    return n;
 }

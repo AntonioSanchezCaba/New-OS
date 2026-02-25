@@ -447,3 +447,8 @@ sid_t surface_imgviewer_open(const char* path)
     surface_invalidate(g_iv.sid);
     return g_iv.sid;
 }
+
+/* Legacy GUI API stubs — never called when ARE is active */
+typedef int wid_t;
+wid_t app_imgviewer_create(void) { surface_imgviewer_open(NULL); return -1; }
+void  imgviewer_tick(void) {}
