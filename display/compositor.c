@@ -255,9 +255,58 @@ void compositor_set_geometry(surf_id_t id, int x, int y, int w, int h)
 {
     comp_surface_t* s = _find_surf(id);
     if (!s) return;
-    s->x = x; s->y = y;
-    /* Resize is more involved (realloc buffer) — just move for now */
-    (void)w; (void)h;
+
+    /* Move: always safe */
+    s->x = x;
+    s->y = y;
+
+    /* Resize: requires buffer reallocation when dimensions change */
+    if (w > 0 && h > 0 && (w != s->w || h != s->h)) {
+        int total_h = (s->flags & SURF_FLAG_DECORATED) ? h + COMP_TITLEBAR_H : h;
+        size_t new_bytes = (size_t)w * (size_t)total_h * sizeof(uint32_t);
+
+        uint32_t* new_buf = (uint32_t*)kmalloc(new_bytes);
+        if (new_buf) {
+            memset(new_buf, 0, new_bytes);
+
+            /* Release old capability and buffer */
+            if (s->buf_cap != CAP_INVALID_ID) cap_release(s->buf_cap);
+            kfree(s->buf);
+
+            s->buf = new_buf;
+            s->w   = w;
+            s->h   = h;
+
+            /* Rebuild canvases over new buffer */
+            s->full.pixels = new_buf;
+            s->full.width  = w;
+            s->full.height = total_h;
+            s->full.stride = w;
+
+            if (s->flags & SURF_FLAG_DECORATED) {
+                s->client.pixels = new_buf + (size_t)COMP_TITLEBAR_H * (size_t)w;
+            } else {
+                s->client.pixels = new_buf;
+            }
+            s->client.width  = w;
+            s->client.height = h;
+            s->client.stride = w;
+
+            /* New capability for the resized buffer */
+            s->buf_cap = cap_create(CAP_TYPE_DISPLAY,
+                                    CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_MAP,
+                                    new_buf, s->owner_tid);
+
+            /* Fill client area and redraw titlebar */
+            draw_rect(&s->client, 0, 0, w, h, COLOR_WIN_BG);
+            _draw_titlebar(s);
+
+            kinfo("COMP: surface %u resized to %dx%d", id, w, h);
+        } else {
+            klog_warn("COMP: kmalloc failed resizing surface %u to %dx%d", id, w, h);
+        }
+    }
+
     s->damaged = true;
     s->dmg_x = 0; s->dmg_y = 0; s->dmg_w = s->w; s->dmg_h = s->h;
 }
@@ -409,8 +458,8 @@ void compositor_composite(void)
                           COMP_BORDER_W,
                           focused ? COLOR_WIN_BORDER : COLOR_MID_GREY);
 
-        /* Blit surface buffer */
-        draw_blit(screen, s->x, s->y, s->buf, s->w, total_h);
+        /* Alpha-blend surface buffer over back buffer (respects ARGB alpha channel) */
+        draw_blit_alpha(screen, s->x, s->y, s->buf, s->w, total_h);
 
         s->damaged = false;
     }
