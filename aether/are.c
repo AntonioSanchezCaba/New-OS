@@ -29,6 +29,7 @@
 #include <gui/font.h>
 #include <kernel/version.h>
 #include <gui/theme.h>
+#include <gui/window.h>
 #include <services/login.h>
 #include <memory.h>
 #include <string.h>
@@ -213,6 +214,7 @@ void are_init(void)
     input_init();
     ui_pool_reset();
     theme_init();   /* ensure colour theme is active in ARE mode */
+    wm_init();      /* initialise legacy WM so wm_create_window() apps work */
 
     kinfo("ARE v%d.%d initialized — %ux%u",
           ARE_VERSION_MAJOR, ARE_VERSION_MINOR, g_screen_w, g_screen_h);
@@ -549,6 +551,7 @@ void are_run(void)
         g_drag_sid    = SID_NONE;
         surface_init();
         context_init();
+        wm_init();   /* reset legacy WM state for new session */
 
         login_run();              /* graphical login screen — blocks until authenticated */
         are_launch_core_surfaces();
@@ -571,6 +574,9 @@ void are_run(void)
 
             /* 2. Dispatch input → gestures / surfaces */
             are_dispatch_input();
+
+            /* 2b. Dispatch GUI events → legacy WM windows */
+            wm_dispatch_events();
 
             /* 3. Tick animations */
             context_tick();
@@ -600,7 +606,10 @@ void are_run(void)
             /* 5b. Compose floating windows above field/overlays */
             are_compose_floats(&screen);
 
-            /* 5c. Draw status bar (below cursor, above everything else) */
+            /* 5c. Compose legacy WM windows (wm_create_window apps) above floats */
+            wm_composite(&screen);
+
+            /* 5d. Draw status bar (below cursor, above everything else) */
             are_draw_statusbar(&screen);
 
             /* 6. Render software cursor over the composed frame */

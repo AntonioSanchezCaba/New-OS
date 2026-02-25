@@ -531,8 +531,8 @@ void wm_composite(canvas_t* screen)
                           WM_BORDER_W,
                           (w->flags & WF_FOCUSED) ? COLOR_WIN_BORDER : COLOR_MID_GREY);
 
-        /* --- Blit entire window buffer (titlebar + client) --- */
-        draw_blit(screen, w->x, w->y, w->buf, w->w, win_total_h);
+        /* --- Alpha-blend entire window buffer (titlebar + client) --- */
+        draw_blit_alpha(screen, w->x, w->y, w->buf, w->w, win_total_h);
 
         /* --- Resize handles: small squares at corners/edges --- */
         if ((w->flags & WF_RESIZEABLE) && (w->flags & WF_FOCUSED)) {
