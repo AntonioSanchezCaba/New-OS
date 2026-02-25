@@ -30,6 +30,7 @@
 #include <kernel/version.h>
 #include <gui/theme.h>
 #include <gui/window.h>
+#include <gui/notify.h>
 #include <services/login.h>
 #include <memory.h>
 #include <string.h>
@@ -215,6 +216,7 @@ void are_init(void)
     ui_pool_reset();
     theme_init();   /* ensure colour theme is active in ARE mode */
     wm_init();      /* initialise legacy WM so wm_create_window() apps work */
+    notify_init();  /* initialise notification queue */
 
     kinfo("ARE v%d.%d initialized — %ux%u",
           ARE_VERSION_MAJOR, ARE_VERSION_MINOR, g_screen_w, g_screen_h);
@@ -522,6 +524,9 @@ static void are_launch_core_surfaces(void)
     surface_launcher_init(lw, lh);
 
     kinfo("ARE: %d surfaces registered", g_ctx.field_count);
+
+    /* Welcome notification visible on first frame */
+    notify_post(NOTIFY_INFO, OS_NAME, "Desktop ready. Alt+W opens launcher.");
 }
 
 /* =========================================================
@@ -551,7 +556,8 @@ void are_run(void)
         g_drag_sid    = SID_NONE;
         surface_init();
         context_init();
-        wm_init();   /* reset legacy WM state for new session */
+        wm_init();      /* reset legacy WM state for new session */
+        notify_init();  /* clear stale notifications for new session */
 
         login_run();              /* graphical login screen — blocks until authenticated */
         are_launch_core_surfaces();
@@ -611,6 +617,9 @@ void are_run(void)
 
             /* 5d. Draw status bar (below cursor, above everything else) */
             are_draw_statusbar(&screen);
+
+            /* 5e. Toast notifications (top-right corner, above status bar) */
+            notify_tick(&screen);
 
             /* 6. Render software cursor over the composed frame */
             cursor_erase();   /* restore pixels under old cursor position */
