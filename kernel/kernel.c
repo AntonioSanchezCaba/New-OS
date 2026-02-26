@@ -63,6 +63,8 @@
 
 /* Aether Render Engine */
 #include <aether/are.h>
+/* Boot animation (plays before the ARE render engine starts) */
+#include <services/bootanim.h>
 
 /* Kernel state */
 static kernel_state_t kernel_state = KERNEL_STATE_BOOT;
@@ -74,6 +76,17 @@ void kernel_set_state(kernel_state_t s) { kernel_state = s; }
 static void print_banner(void);
 static void init_userland(void);
 void kmain_thread(void);
+
+/*
+ * bootanim_timer_cb — adapts the PIT callback signature
+ * (void cb(uint64_t)) to bootanim_tick() (void cb(void)).
+ * Registered during the boot animation window and cleared
+ * before are_run().
+ */
+static void bootanim_timer_cb(uint64_t ticks __attribute__((unused)))
+{
+    bootanim_tick();
+}
 
 /*
  * kernel_main - called from boot.asm after entering 64-bit long mode.
@@ -152,6 +165,13 @@ void kernel_main(struct multiboot2_info* mb2_info)
             anim_init();
             kinfo("Initializing Aether Render Engine...");
             are_init();
+            /* Pre-register boot animation steps.  The animation itself
+             * starts after cpu_sti() when the timer ISR fires.        */
+            bootanim_add_step("Initializing hardware...",    1);
+            bootanim_add_step("Starting kernel layer...",    1);
+            bootanim_add_step("Loading filesystem...",       1);
+            bootanim_add_step("Starting process manager...", 1);
+            bootanim_add_step("Launching desktop...",        1);
         } else {
             klog_warn("Framebuffer init failed, GUI disabled");
         }
@@ -266,6 +286,38 @@ void kernel_main(struct multiboot2_info* mb2_info)
 
     /* === Phase 9: Launch userland === */
     init_userland();
+
+    /* === Phase 9b: Boot animation ===
+     *
+     * Now that interrupts are enabled and the scheduler is running we can
+     * let the PIT drive the animation at 100 Hz.  We distribute the five
+     * pre-registered steps evenly across the PROGRESS phase window
+     * (~800 ms) so the progress bar fills smoothly, then spin-wait for
+     * the fade-out to complete before handing off to the render engine.
+     */
+    if (fb_ready()) {
+        kinfo("Playing boot animation...");
+        bootanim_start();
+        timer_register_callback(bootanim_timer_cb);
+
+        /* Advance one step every ~14 ticks (140 ms).
+         * 5 steps × 14 ticks = 70 ticks ≈ fits the 80-tick PROGRESS phase. */
+        for (int step = 0; step < 5; step++) {
+            uint32_t t0 = (uint32_t)timer_ticks();
+            while ((uint32_t)timer_ticks() - t0 < 14)
+                scheduler_yield();
+            bootanim_step_done();
+        }
+
+        /* Wait for the fade-out phase to complete */
+        while (!bootanim_done())
+            scheduler_yield();
+
+        timer_register_callback(NULL);   /* release the callback slot */
+        fb_clear(0xFF000000);            /* clean black for ARE handoff */
+        fb_flip();
+        kinfo("Boot animation complete.");
+    }
 
     /* === Phase 10: Enter Aether Render Engine (replaces gui_run) === */
     kinfo("Entering Aether Render Engine...");

@@ -27,6 +27,7 @@
 #include <drivers/cursor.h>
 #include <gui/draw.h>
 #include <gui/font.h>
+#include <gui/animation.h>
 #include <kernel/version.h>
 #include <gui/theme.h>
 #include <gui/window.h>
@@ -191,6 +192,7 @@ static void are_compose_floats(canvas_t* c)
 static void are_dispatch_input(void);
 static void are_splash(void);
 static void are_launch_core_surfaces(void);
+static void are_desktop_fadein(void);
 
 /* =========================================================
  * Queries
@@ -463,38 +465,85 @@ static void are_dispatch_input(void)
 
 /* =========================================================
  * Splash (fade-in from black to Field)
+ *
+ * Uses the active theme's splash palette so colour choices are
+ * consistent with the rest of the UI.  Interpolation uses the
+ * smoothstep curve (3t²−2t³) for a natural ease-in-out feel.
+ * A thin progress bar at the bottom of the screen fills in sync
+ * with the alpha ramp, providing visual engagement during the
+ * brief pause before the login screen appears.
  * ========================================================= */
 static void are_splash(void)
 {
+#define SPLASH_FRAMES 32   /* ~640 ms at 2-tick (~20 ms) steps */
+
     canvas_t sc = draw_main_canvas();
     uint32_t sw = sc.width, sh = sc.height;
+    const theme_t* th = theme_current();
 
-    /* Quick 30-frame fade from black with centered title */
-    for (int f = 0; f <= 30; f++) {
-        uint8_t a = (uint8_t)((f * 255) / 30);
+    for (int f = 0; f <= SPLASH_FRAMES; f++) {
 
-        /* Black background */
+        /* Smoothstep ease-in-out:  α = 3t² − 2t³,  t ∈ [0,1]
+         * Implemented in fixed-point with t scaled to 0..256.  */
+        int t256  = (f * 256) / SPLASH_FRAMES;
+        int t2    = (t256 * t256) >> 8;        /* t² · 256 */
+        int t3    = (t2   * t256) >> 8;        /* t³ · 256 */
+        int sv    = 3 * t2 - 2 * t3;           /* smoothstep · 256 */
+        uint8_t a = (uint8_t)(sv > 255 ? 255 : sv < 0 ? 0 : sv);
+
+        /* Background: lerp black → theme splash_bg */
+        uint8_t bg_r = (uint8_t)((uint32_t)ACOLOR_R(th->splash_bg) * a / 255);
+        uint8_t bg_g = (uint8_t)((uint32_t)ACOLOR_G(th->splash_bg) * a / 255);
+        uint8_t bg_b = (uint8_t)((uint32_t)ACOLOR_B(th->splash_bg) * a / 255);
+        uint32_t bg_px = ACOLOR(bg_r, bg_g, bg_b, 0xFF);
         for (int i = 0; i < (int)(sw * sh); i++)
-            sc.pixels[i] = 0xFF000000;
+            sc.pixels[i] = bg_px;
 
-        /* Fade in the ARE name + OS version */
-        uint32_t tc = ACOLOR(0xA0, 0xC0, 0xFF, a);
-        uint32_t sc2= ACOLOR(0x60, 0x80, 0xB0, a);
+        /* Title — theme splash_logo color, fades in with alpha ramp */
+        uint32_t tc  = ACOLOR(ACOLOR_R(th->splash_logo),
+                              ACOLOR_G(th->splash_logo),
+                              ACOLOR_B(th->splash_logo), a);
+        /* Subtitle — theme splash_text, slightly delayed (¾ alpha) */
+        uint32_t sc2 = ACOLOR(ACOLOR_R(th->splash_text),
+                              ACOLOR_G(th->splash_text),
+                              ACOLOR_B(th->splash_text),
+                              (uint8_t)((uint32_t)a * 3 / 4));
 
-        int title_x = (int)sw / 2 - (int)strlen(OS_NAME)  * FONT_W / 2;
+        int title_x = (int)sw / 2 - (int)strlen(OS_NAME)         * FONT_W / 2;
         int title_y = (int)sh / 2 - FONT_H;
         int ver_x   = (int)sw / 2 - (int)strlen(OS_BANNER_SHORT) * FONT_W / 2;
         int ver_y   = title_y + FONT_H + 6;
 
-        draw_string(&sc, title_x, title_y, OS_NAME,         tc,  ACOLOR(0,0,0,0));
-        draw_string(&sc, ver_x,   ver_y,   OS_BANNER_SHORT,  sc2, ACOLOR(0,0,0,0));
+        draw_string(&sc, title_x, title_y, OS_NAME,        tc,  ACOLOR(0,0,0,0));
+        draw_string(&sc, ver_x,   ver_y,   OS_BANNER_SHORT, sc2, ACOLOR(0,0,0,0));
+
+        /* Thin progress bar (fills in lockstep with the alpha ramp) */
+        int bar_w  = (int)sw * 2 / 3;
+        int bar_x  = ((int)sw - bar_w) / 2;
+        int bar_y  = (int)sh - 24;
+        int fill_w = bar_w * a / 255;
+        if (bar_y > 0 && bar_w > 0) {
+            /* Track */
+            draw_rect_alpha(&sc, bar_x, bar_y, bar_w, 3,
+                ACOLOR(ACOLOR_R(th->splash_bar_bg),
+                       ACOLOR_G(th->splash_bar_bg),
+                       ACOLOR_B(th->splash_bar_bg), a / 2));
+            /* Fill */
+            if (fill_w > 0)
+                draw_rect_alpha(&sc, bar_x, bar_y, fill_w, 3,
+                    ACOLOR(ACOLOR_R(th->splash_bar_fill),
+                           ACOLOR_G(th->splash_bar_fill),
+                           ACOLOR_B(th->splash_bar_fill), a));
+        }
 
         fb_flip();
 
-        /* Small delay */
+        /* ~20 ms per frame */
         uint32_t t0 = timer_get_ticks();
         while (timer_get_ticks() - t0 < 2) scheduler_yield();
     }
+
+#undef SPLASH_FRAMES
 }
 
 /* =========================================================
@@ -531,6 +580,57 @@ static void are_launch_core_surfaces(void)
 }
 
 /* =========================================================
+ * Post-login desktop reveal
+ *
+ * Composites a full desktop frame and overlays a black veil
+ * that lifts over ~20 frames (~320 ms).  Uses a squared
+ * ease-in curve so the reveal is slow at first (giving the
+ * eye time to orient) then snaps clean.
+ * ========================================================= */
+static void are_desktop_fadein(void)
+{
+#define FADEIN_FRAMES 20
+
+    canvas_t screen;
+
+    for (int f = 0; f <= FADEIN_FRAMES; f++) {
+        /* Ease-in squared for the overlay:
+         *   inv goes FADEIN_FRAMES → 0 (overlay disappears)
+         *   t   = inv / FADEIN_FRAMES  (1 → 0)
+         *   a   = t²                   (1 → 0, slow start) */
+        int inv = FADEIN_FRAMES - f;
+        int t   = (inv * 256) / FADEIN_FRAMES;     /* 256 → 0 */
+        uint8_t overlay_a = (uint8_t)((t * t) >> 8);
+
+        /* Full desktop composite */
+        screen = draw_main_canvas();
+        field_draw_background(&screen);
+        field_compose(&screen);
+        field_draw_nav_dots(&screen);
+        are_compose_floats(&screen);
+        wm_composite(&screen);
+        are_draw_statusbar(&screen);
+        notify_tick(&screen);
+
+        /* Black veil that lifts away */
+        if (overlay_a > 0)
+            draw_rect_alpha(&screen, 0, 0,
+                            (int)g_screen_w, (int)g_screen_h,
+                            ACOLOR(0, 0, 0, overlay_a));
+
+        cursor_erase();
+        cursor_render();
+        fb_flip();
+
+        /* ~16 ms per frame */
+        uint32_t t0 = timer_get_ticks();
+        while (timer_get_ticks() - t0 < 2) scheduler_yield();
+    }
+
+#undef FADEIN_FRAMES
+}
+
+/* =========================================================
  * Main render loop
  * ========================================================= */
 void are_run(void)
@@ -562,6 +662,7 @@ void are_run(void)
 
         login_run();              /* graphical login screen — blocks until authenticated */
         are_launch_core_surfaces();
+        are_desktop_fadein();     /* smooth reveal: black veil lifts over ~320 ms */
 
         g_running = true;
         uint32_t last_ticks = 0;
@@ -589,6 +690,7 @@ void are_run(void)
             /* 3. Tick animations */
             context_tick();
             field_tick();
+            anim_tick();   /* advance window open/close/minimize animations */
 
             /* 4. Render dirty surfaces to their own buffers */
             for (int i = 0; i < g_ctx.field_count; i++)
