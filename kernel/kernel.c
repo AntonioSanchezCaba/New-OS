@@ -48,6 +48,7 @@
 #include <kernel/diskman.h>
 #include <kernel/users.h>
 #include <kernel/apkg.h>
+#include <kernel/pkg.h>
 #include <mm/buddy.h>
 #include <display/compositor.h>
 #include <input/input_svc.h>
@@ -251,6 +252,8 @@ void kernel_main(struct multiboot2_info* mb2_info)
 
     kinfo("Initializing package manager (apkg)...");
     apkg_init();
+    kinfo("Initializing package manager (pkg/.aur)...");
+    pkg_init();
 
     /* === Phase 7: Syscall interface === */
     kinfo("Initializing system call interface...");

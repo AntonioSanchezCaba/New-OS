@@ -11,6 +11,7 @@
 #include <memory.h>
 #include <interrupts.h>
 #include <kernel/signal.h>
+#include <kernel/cap.h>
 
 /* Maximum number of simultaneous processes */
 #define MAX_PROCESSES   256
@@ -22,6 +23,9 @@
 
 /* Maximum open file descriptors per process */
 #define MAX_FDS         64
+
+/* Maximum capability tokens a process may hold */
+#define PROC_MAX_CAPS   16
 
 /* Process states */
 typedef enum {
@@ -100,6 +104,10 @@ typedef struct process {
 
     /* File descriptors */
     fd_entry_t    fds[MAX_FDS];
+
+    /* Capability table — tokens granted at launch from package manifest */
+    cap_id_t      cap_ids[PROC_MAX_CAPS]; /* Owned capability tokens   */
+    int           cap_count;              /* Number of active caps      */
 
     /* Accounting */
     uint64_t      start_tick;     /* Timer tick when process was created */

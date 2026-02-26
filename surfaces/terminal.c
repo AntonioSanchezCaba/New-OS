@@ -250,6 +250,9 @@ static void shell_exec(const char* cmd)
         term_puts("  ping host — ICMP ping a host/IP\r\n");
         term_puts("  dns host  — resolve hostname to IP\r\n");
         term_puts("  run pkg   — execute installed package\r\n");
+        term_puts("  install p — install package from repo\r\n");
+        term_puts("  packages  — list installed packages\r\n");
+        term_puts("  repo      — list available packages\r\n");
         term_puts("  reboot    — reboot system\r\n");
         term_puts("  halt      — halt system\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
@@ -523,7 +526,7 @@ static void shell_exec(const char* cmd)
         const char* pkg = cmd + 4;
         pid_t rpid = apkg_exec(pkg);
         if ((int)rpid < 0) {
-            term_puts("run: not found: ");
+            term_puts("run: not found or launch failed: ");
             term_puts(pkg);
             term_puts("\r\n");
         } else {
@@ -531,6 +534,69 @@ static void shell_exec(const char* cmd)
             snprintf(rb, sizeof(rb), "run: '%s' launched as pid %d\r\n",
                      pkg, (int)rpid);
             term_puts(rb);
+        }
+    } else if (strncmp(cmd, "install ", 8) == 0) {
+        /* install <name> — fetch from repo catalog and install */
+        const char* pkg = cmd + 8;
+        term_puts("install: fetching '");
+        term_puts(pkg);
+        term_puts("'...\r\n");
+        int rc = apkg_repo_install_by_name(pkg);
+        if (rc == 0) {
+            term_puts("install: '");
+            term_puts(pkg);
+            term_puts("' installed successfully\r\n");
+        } else {
+            const char* reason =
+                (rc == -2) ? "CRC mismatch" :
+                (rc == -3) ? "dependency not satisfied" :
+                (rc == -4) ? "package DB full" :
+                (rc == -5) ? "already installed" :
+                             "not found in repo";
+            char ib[96];
+            snprintf(ib, sizeof(ib), "install: '%s' failed: %s\r\n",
+                     pkg, reason);
+            term_puts(ib);
+        }
+    } else if (strncmp(cmd, "packages", 8) == 0) {
+        /* packages — list installed packages */
+        int cnt = apkg_count();
+        if (cnt == 0) {
+            term_puts("No packages installed.\r\n");
+        } else {
+            char lb[64];
+            snprintf(lb, sizeof(lb), "%d package(s) installed:\r\n", cnt);
+            term_puts(lb);
+            for (int i = 0; i < cnt; i++) {
+                const apkg_record_t* r = apkg_get(i);
+                if (!r) continue;
+                char pb[128];
+                snprintf(pb, sizeof(pb), "  %-20s  v%-12s  %s\r\n",
+                         r->name, r->version, r->author);
+                term_puts(pb);
+            }
+        }
+    } else if (strncmp(cmd, "repo", 4) == 0) {
+        /* repo — list available packages in catalog */
+        int cnt = apkg_catalog_count();
+        if (cnt == 0) {
+            term_puts("No packages in repo (cache empty or not scanned).\r\n");
+        } else {
+            char lb[64];
+            snprintf(lb, sizeof(lb), "%d package(s) available:\r\n", cnt);
+            term_puts(lb);
+            for (int i = 0; i < cnt; i++) {
+                const apkg_catalog_t* c = apkg_catalog_get(i);
+                if (!c) continue;
+                char pb[160];
+                /* Mark installed packages with an asterisk */
+                bool inst = (apkg_find(c->name) != NULL);
+                snprintf(pb, sizeof(pb), "  %c %-20s  v%-10s  caps:%-2u  %s\r\n",
+                         inst ? '*' : ' ',
+                         c->name, c->version, c->cap_count, c->description);
+                term_puts(pb);
+            }
+            term_puts("  (* = installed)\r\n");
         }
     } else if (strncmp(cmd, "mv ", 3) == 0) {
         /* mv <src> <dst> — copy then unlink source */

@@ -17,7 +17,8 @@
 
 #define APKG_MAGIC       "APKG"
 #define APKG_MAGIC_LEN   4
-#define APKG_FMT_VERSION 1
+#define APKG_FMT_VERSION 2   /* v2 adds capability manifest in header */
+#define APKG_FMT_MIN     1   /* Oldest format version accepted        */
 
 #define APKG_NAME_LEN    32
 #define APKG_VER_LEN     16
@@ -29,21 +30,45 @@
 
 #define APKG_DB_MAX      64    /* Max installed packages tracked   */
 #define APKG_CATALOG_MAX 128   /* Max packages in repo catalog     */
+#define APKG_CAP_MAX     5     /* Max capability declarations/pkg  */
 
-/* ---- On-disk header (256 bytes) ---- */
+/*
+ * ---- Capability declaration (8 bytes, packed) ----
+ *
+ * Each entry names one capability type + rights mask that the app
+ * requires.  The kernel grants exactly these tokens to the new process
+ * on launch — nothing more.  An app with no entries runs fully sandboxed
+ * with zero ambient authority.
+ *
+ * type   : cap_type_t   (CAP_TYPE_FILE, CAP_TYPE_DISPLAY, …)
+ * rights : cap_rights_t bitmask (CAP_RIGHT_READ | CAP_RIGHT_WRITE, …)
+ */
 typedef struct __attribute__((packed)) {
-    char     magic[4];              /* "APKG"                        */
-    uint16_t fmt_version;           /* Format version (= 1)          */
-    uint16_t flags;                 /* Reserved, set to 0            */
-    char     name[APKG_NAME_LEN];   /* Package name (null-terminated)*/
-    char     version[APKG_VER_LEN]; /* Semver string, e.g. "1.0.0"  */
-    char     description[APKG_DESC_LEN]; /* Short description        */
-    char     author[APKG_AUTHOR_LEN];    /* Author string            */
-    uint8_t  dep_count;             /* Number of dependencies (0-8)  */
+    uint8_t  type;      /* cap_type_t  — resource class     */
+    uint8_t  _pad[3];   /* reserved, set to 0               */
+    uint32_t rights;    /* cap_rights_t bitmask             */
+} apkg_cap_decl_t;      /* 8 bytes                          */
+
+/* ---- On-disk header ---- */
+typedef struct __attribute__((packed)) {
+    char     magic[4];              /* "APKG"                            */
+    uint16_t fmt_version;           /* Format version (1 or 2)           */
+    uint16_t flags;                 /* Reserved, set to 0                */
+    char     name[APKG_NAME_LEN];   /* Package name (null-terminated)    */
+    char     version[APKG_VER_LEN]; /* Semver string, e.g. "1.0.0"      */
+    char     description[APKG_DESC_LEN]; /* Short description            */
+    char     author[APKG_AUTHOR_LEN];    /* Author string                */
+    uint8_t  dep_count;             /* Number of dependencies (0-8)      */
     uint8_t  _pad[3];
-    uint32_t payload_size;          /* Byte size of binary payload   */
-    uint32_t payload_crc32;         /* CRC32 of payload bytes        */
-    uint8_t  _reserved[48];        /* Pad to 256 bytes              */
+    uint32_t payload_size;          /* Byte size of binary payload        */
+    uint32_t payload_crc32;         /* CRC32 of payload bytes             */
+    /* --- Capability manifest (v2+, was _reserved[48] in v1) --- *
+     * v1 packages have cap_count=0 here (zero-initialised reserved).   *
+     * Layout: 1 + 3 + (APKG_CAP_MAX * 8) + 4 = 48 bytes              */
+    uint8_t          cap_count;          /* 0..APKG_CAP_MAX               */
+    uint8_t          _cap_pad[3];        /* reserved, set to 0            */
+    apkg_cap_decl_t  caps[APKG_CAP_MAX]; /* 5 × 8 = 40 bytes             */
+    uint8_t          _reserved[4];       /* future use, set to 0          */
 } apkg_header_t;
 
 /* ---- Dependency entry (48 bytes) ---- */
@@ -72,8 +97,10 @@ typedef struct {
     char     version[APKG_VER_LEN];
     char     description[APKG_DESC_LEN];
     char     author[APKG_AUTHOR_LEN];
-    char     path[APKG_PATH_LEN];   /* VFS path to the .apkg file */
+    char     path[APKG_PATH_LEN];        /* VFS path to the .apkg file  */
     bool     available;
+    uint8_t  cap_count;                  /* Declared capability count   */
+    apkg_cap_decl_t caps[APKG_CAP_MAX];  /* Capability requirements     */
 } apkg_catalog_t;
 
 /* ---- Installed package API ---- */

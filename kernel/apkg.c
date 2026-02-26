@@ -13,6 +13,7 @@
  *   packages distributed as .apkg files containing ELF payloads.
  */
 #include <kernel/apkg.h>
+#include <kernel/cap.h>
 #include <fs/vfs.h>
 #include <memory.h>
 #include <string.h>
@@ -143,6 +144,12 @@ int apkg_repo_scan(const char* dir_path)
         strncpy(ce->author,      hdr.author,      APKG_AUTHOR_LEN - 1);
         strncpy(ce->path,        fpath,           APKG_PATH_LEN  - 1);
         ce->available = true;
+        /* Copy capability manifest (v2 only; v1 has cap_count=0) */
+        if (hdr.fmt_version >= 2 && hdr.cap_count <= APKG_CAP_MAX) {
+            ce->cap_count = hdr.cap_count;
+            memcpy(ce->caps, hdr.caps,
+                   hdr.cap_count * sizeof(apkg_cap_decl_t));
+        }
         added++;
     }
 
@@ -265,8 +272,9 @@ int apkg_install(const uint8_t* pkg_data, size_t pkg_size)
         klog_warn("APKG: bad magic");
         return -1;
     }
-    if (hdr->fmt_version != APKG_FMT_VERSION) {
-        klog_warn("APKG: unsupported format version %u", hdr->fmt_version);
+    if (hdr->fmt_version < APKG_FMT_MIN || hdr->fmt_version > APKG_FMT_VERSION) {
+        klog_warn("APKG: unsupported format version %u (supported 1-%u)",
+                  hdr->fmt_version, APKG_FMT_VERSION);
         return -1;
     }
 
@@ -567,6 +575,17 @@ pid_t apkg_exec(const char* name)
         return -1;
     }
 
+    /* 5a. Save capability manifest before buf is freed */
+    uint8_t         saved_cap_count = 0;
+    apkg_cap_decl_t saved_caps[APKG_CAP_MAX];
+    memset(saved_caps, 0, sizeof(saved_caps));
+    if (hdr->fmt_version >= 2 &&
+        hdr->cap_count > 0 && hdr->cap_count <= APKG_CAP_MAX) {
+        saved_cap_count = hdr->cap_count;
+        memcpy(saved_caps, hdr->caps,
+               saved_cap_count * sizeof(apkg_cap_decl_t));
+    }
+
     /* 6. Create user-space process (entry=NULL; we set context after ELF load) */
     process_t* proc = process_create(rec->name, NULL, false);
     if (!proc) {
@@ -608,6 +627,42 @@ pid_t apkg_exec(const char* name)
     proc->context.cs     = 0x23;    /* user code segment (ring 3) */
     proc->context.ss     = 0x1B;    /* user data segment (ring 3) */
     proc->state          = PROC_STATE_READY;
+
+    /* 9a. Capability enforcement — grant only what the manifest declares.
+     *
+     * For each declared cap (type, rights) we call cap_create() to mint a
+     * fresh token owned by this process.  The process starts with zero
+     * ambient authority; anything not listed here is inaccessible.
+     *
+     * Apps built against format v1 (saved_cap_count == 0) run fully
+     * sandboxed: they can only use syscall-mediated kernel services that
+     * require no capability (e.g. yield, exit).
+     */
+    proc->cap_count = 0;
+    if (saved_cap_count > 0) {
+        for (int c = 0; c < (int)saved_cap_count; c++) {
+            const apkg_cap_decl_t* decl = &saved_caps[c];
+            /* Skip null / placeholder entries */
+            if (decl->type == CAP_TYPE_NULL || decl->rights == CAP_RIGHT_NONE)
+                continue;
+            if (proc->cap_count >= PROC_MAX_CAPS)
+                break;
+            cap_id_t cid = cap_create((cap_type_t)decl->type,
+                                      (cap_rights_t)decl->rights,
+                                      NULL,              /* object bound later */
+                                      (uint32_t)proc->pid);
+            if (cid != CAP_INVALID_ID)
+                proc->cap_ids[proc->cap_count++] = cid;
+            else
+                klog_warn("APKG exec: cap_create failed for type=%u rights=0x%x",
+                          decl->type, decl->rights);
+        }
+        kinfo("APKG exec: granted %d/%d capability token(s) to '%s' (pid=%d)",
+              proc->cap_count, (int)saved_cap_count, name, proc->pid);
+    } else {
+        kinfo("APKG exec: '%s' (pid=%d) sandbox — no capabilities granted",
+              name, proc->pid);
+    }
 
     /* 10. Hand to scheduler */
     scheduler_add(proc);
