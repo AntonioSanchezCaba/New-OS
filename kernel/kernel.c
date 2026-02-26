@@ -43,6 +43,8 @@
 #include <kernel/ipc.h>
 #include <kernel/svcbus.h>
 #include <kernel/secmon.h>
+#include <kernel/shm.h>
+#include <kernel/tty.h>
 #include <kernel/diskman.h>
 #include <kernel/users.h>
 #include <kernel/apkg.h>
@@ -171,6 +173,9 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("Initializing service bus...");
     svcbus_init();
 
+    kinfo("Initializing shared memory subsystem...");
+    shm_init();
+
     /* Buddy allocator: seed with 16MB starting above the kernel heap */
     {
         uint64_t buddy_base_phys = 0x2000000;  /* 32 MB mark */
@@ -236,6 +241,9 @@ void kernel_main(struct multiboot2_info* mb2_info)
 
     kinfo("Initializing scheduler...");
     scheduler_init();
+
+    kinfo("Initializing TTY subsystem...");
+    tty_init();
 
     /* === Phase 6b: User accounts and package manager === */
     kinfo("Initializing user account system...");

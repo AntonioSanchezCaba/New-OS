@@ -361,9 +361,7 @@ void process_kill(pid_t pid, int signal)
     process_t* proc = process_get_by_pid(pid);
     if (!proc) return;
 
-    /* For now: SIGKILL-style unconditional termination */
-    (void)signal;
-    process_exit(proc, -1);
+    signal_send_proc(proc, signal);
 }
 
 process_t* process_get_by_pid(pid_t pid)
