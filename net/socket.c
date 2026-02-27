@@ -9,6 +9,7 @@
  */
 #include <net/socket.h>
 #include <net/tcp.h>
+#include <net/udp.h>
 #include <net/ip.h>
 #include <net/net.h>
 #include <kernel.h>
@@ -49,7 +50,7 @@ static uint16_t sock_ephemeral_port(void)
 {
     static uint16_t next_port = 49152;
     uint16_t p = next_port++;
-    if (next_port == 0 || next_port > 65535) next_port = 49152;
+    if (next_port == 0) next_port = 49152;
     return p;
 }
 

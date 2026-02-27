@@ -200,7 +200,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
     /* Buddy allocator: seed with 16MB starting above the kernel heap */
     {
         uint64_t buddy_base_phys = 0x2000000;  /* 32 MB mark */
-        uint64_t buddy_base_virt = PHYS_TO_VIRT(buddy_base_phys);
+        uint64_t buddy_base_virt = (uint64_t)PHYS_TO_VIRT(buddy_base_phys);
         uint64_t buddy_size      = 16 * 1024 * 1024;  /* 16 MB */
         kinfo("Initializing buddy allocator (16 MB at phys 0x%llx)...",
               (unsigned long long)buddy_base_phys);
@@ -340,7 +340,7 @@ static void print_banner(void)
         "\n"
         "    _____  __  __              ____   ____  \n"
         "   /  _  |/ _||_ |__  ___  _ / __ \\ / ___| \n"
-        "  | |_| || |_  | '_ \\/ _ \\| |  |  \\\___ \\  \n"
+        "  | |_| || |_  | '_ \\/ _ \\| |  |  \\___ \\  \n"
         "  |  _  ||  _| | | | | __/| |  |__/ ___) | \n"
         "  |_| |_||_|   |_| |_|\\___||_|\\_____/____/  \n"
         "\n"

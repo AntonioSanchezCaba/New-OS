@@ -173,3 +173,6 @@ isr_common:
 
     ;; Return from interrupt (restores RIP, CS, RFLAGS, RSP, SS from CPU frame)
     iretq
+
+; Mark stack as non-executable (suppresses GNU-stack linker warning)
+section .note.GNU-stack noalloc noexec nowrite progbits

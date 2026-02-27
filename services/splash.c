@@ -129,7 +129,6 @@ void splash_run(void)
     canvas_t screen = draw_main_canvas();
 
     /* Animate through phases */
-    uint32_t start_ticks = timer_get_ticks();
     uint32_t total_ticks = (uint32_t)(SPLASH_DURATION_MS * TIMER_FREQ / 1000);
 
     /* Count phases */

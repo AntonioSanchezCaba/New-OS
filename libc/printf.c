@@ -49,7 +49,7 @@ int vsnprintf(char* buf, size_t size, const char* fmt, va_list ap)
 
 #define PUT(c) do { if (pos + 1 < size) { buf[pos++] = (c); } } while(0)
 #define PUTS(s, n) do { \
-    for (size_t _i = 0; _i < (n); _i++) { PUT((s)[_i]); } \
+    for (size_t _i = 0; _i < (size_t)(n); _i++) { PUT((s)[_i]); } \
 } while(0)
 
     while (*fmt) {

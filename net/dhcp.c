@@ -11,6 +11,7 @@
 #include <net/net.h>
 #include <net/ip.h>
 #include <net/tcp.h>
+#include <net/udp.h>
 #include <net/ethernet.h>
 #include <drivers/e1000.h>
 #include <drivers/timer.h>

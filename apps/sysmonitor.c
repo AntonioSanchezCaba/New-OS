@@ -153,6 +153,7 @@ static void draw_cpu_graph(canvas_t* c, int x, int y, int w, int h)
 
 static void draw_overview(canvas_t* c, sm_t* s)
 {
+    (void)s;
     int y = 10;
 
     /* Section: CPU */

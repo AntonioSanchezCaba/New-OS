@@ -18,13 +18,7 @@ static const char* const level_names[] = {
     "DEBUG", "INFO ", "WARN ", "ERROR", "PANIC"
 };
 
-static const uint8_t level_colors[] = {
-    /* DEBUG */ 0,  /* set below */
-    /* INFO  */ 0,
-    /* WARN  */ 0,
-    /* ERROR */ 0,
-    /* PANIC */ 0,
-};
+/* level_colors reserved for future VGA color output */
 
 /*
  * kernel_log - format and emit a log message.

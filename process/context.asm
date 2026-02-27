@@ -124,3 +124,6 @@ kernel_thread_entry:
     cli
     hlt
     jmp     .halt
+
+; Mark stack as non-executable (suppresses GNU-stack linker warning)
+section .note.GNU-stack noalloc noexec nowrite progbits

@@ -5,6 +5,7 @@
 #include <net/ethernet.h>
 #include <net/net.h>
 #include <net/tcp.h>
+#include <net/udp.h>
 #include <kernel.h>
 #include <string.h>
 #include <memory.h>

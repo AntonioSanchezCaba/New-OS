@@ -179,7 +179,7 @@ int fat32_free_chain(fat32_fs_t* fs, uint32_t start)
 
 /* ── LFN helper: assemble a long filename from LFN entries ───────────── */
 
-static void lfn_collect_chars(const fat32_lfn_t* lfn, char* buf, size_t* pos,
+static void __attribute__((unused)) lfn_collect_chars(const fat32_lfn_t* lfn, char* buf, size_t* pos,
                                size_t maxlen)
 {
     /* LFN stores UCS-2; we downcast to ASCII (Latin-1) */
@@ -270,7 +270,6 @@ static int fat32_read_dir_entry(fat32_fs_t* fs, uint32_t dir_cluster,
     if (de->attr == FAT_ATTR_LFN) {
         /* LFN entry — collect the name from preceding LFN entries */
         char lfn_name[256];
-        size_t lfn_pos = 0;
         memset(lfn_name, 0, sizeof(lfn_name));
 
         /* Read backwards through LFN entries (they're stored in reverse) */
@@ -296,7 +295,7 @@ static int fat32_read_dir_entry(fat32_fs_t* fs, uint32_t dir_cluster,
 
 /* ── Path resolution ─────────────────────────────────────────────────── */
 
-static int fat32_resolve(fat32_fs_t* fs, const char* path,
+static int __attribute__((unused)) fat32_resolve(fat32_fs_t* fs, const char* path,
                           fat32_entry_t* out)
 {
     if (!path || path[0] != '/') return -EINVAL;
@@ -688,12 +687,12 @@ static ssize_t _fat32_vfs_write(vfs_node_t* node, off_t offset,
      * directory entry so the changes survive a remount.
      */
     if (ctx->dir_cluster != 0 && ctx->dirent_idx != (uint32_t)-1) {
-        size_t   bpc  = fs->bytes_per_cluster;
-        uint32_t epc  = bpc / 32;
-        uint32_t ci   = ctx->dirent_idx / epc;
-        uint32_t off  = ctx->dirent_idx % epc;
-        uint32_t dc   = ctx->dir_cluster;
-        for (uint32_t i = 0; i < ci; i++) {
+        size_t   bpc      = fs->bytes_per_cluster;
+        uint32_t epc      = bpc / 32;
+        uint32_t dir_ci   = ctx->dirent_idx / epc;
+        uint32_t off      = ctx->dirent_idx % epc;
+        uint32_t dc       = ctx->dir_cluster;
+        for (uint32_t i = 0; i < dir_ci; i++) {
             dc = fat32_next_cluster(fs, dc);
             if (dc >= FAT32_EOC_MIN || dc < 2) { dc = 0; break; }
         }

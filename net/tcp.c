@@ -91,7 +91,7 @@ static uint16_t tcp_checksum(ip4_addr_t src, ip4_addr_t dst, uint8_t proto,
         uint8_t  zero;
         uint8_t  proto;
         uint16_t len;
-    } __attribute__((packed)) pseudo;
+    } pseudo;
 
     pseudo.src   = src;
     pseudo.dst   = dst;
@@ -100,7 +100,7 @@ static uint16_t tcp_checksum(ip4_addr_t src, ip4_addr_t dst, uint8_t proto,
     pseudo.len   = htons((uint16_t)seg_len);
 
     uint32_t acc = 0;
-    const uint16_t* p = (const uint16_t*)&pseudo;
+    const uint16_t* p = (const uint16_t*)(const void*)&pseudo;
     for (size_t i = 0; i < sizeof(pseudo) / 2; i++) acc += p[i];
 
     p = (const uint16_t*)seg;

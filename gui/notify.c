@@ -125,10 +125,9 @@ void notify_tick(canvas_t* screen)
         draw_string(screen, tx, ny + 6, n->title, th->notif_text, rgba(0,0,0,0));
 
         /* Body */
-        uint32_t body_col = th->text_secondary;
-        if (th == &(*(theme_current()))) body_col = th->notif_text;
+        uint32_t body_col = (th == &(*(theme_current()))) ? th->notif_text : th->text_secondary;
         /* Slightly lighter body text */
-        draw_string(screen, tx, ny + 6 + FONT_H + 4, n->body, th->text_secondary, rgba(0,0,0,0));
+        draw_string(screen, tx, ny + 6 + FONT_H + 4, n->body, body_col, rgba(0,0,0,0));
 
         /* Progress bar at bottom */
         int bar_w = (int)((uint64_t)(NOTIF_W - 2) * left / n->duration);

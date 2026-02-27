@@ -50,7 +50,7 @@ static canvas_t  g_screen;
 static bool      startmenu_open    = false;
 static int       g_workspace       = 0;    /* current virtual workspace 0-3 */
 static uint32_t  g_frame_count     = 0;
-static bool      g_first_frame     = true;
+/* g_first_frame removed - unused */
 
 /* ---- Taskbar entries ---- */
 typedef struct {

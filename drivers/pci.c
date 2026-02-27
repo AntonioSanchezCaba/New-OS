@@ -40,7 +40,7 @@ void pci_config_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
 }
 
 /* Read 16-bit word from config space */
-static uint16_t pci_read16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off)
+static uint16_t __attribute__((unused)) pci_read16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off)
 {
     uint32_t dword = pci_config_read(bus, slot, func, off & 0xFC);
     return (uint16_t)(dword >> ((off & 2) * 8));

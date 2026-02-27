@@ -118,6 +118,7 @@ void scheduler_remove(process_t* proc)
 
 void scheduler_tick(cpu_registers_t* regs)
 {
+    (void)regs;
     sched_ticks++;
 
     if (!current_process) {

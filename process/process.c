@@ -238,6 +238,7 @@ process_t* process_fork(process_t* parent)
 
 int process_exec(process_t* proc, const char* path, char* const argv[])
 {
+    (void)argv;
     /* Open the ELF file */
     vfs_node_t* node = vfs_open(path, O_RDONLY);
     if (!node) {

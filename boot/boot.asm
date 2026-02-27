@@ -283,7 +283,7 @@ gdt64_ptr:
 ;;; =========================================================
 ;;; Page tables (4KB aligned, in boot BSS)
 ;;; =========================================================
-section .boot.bss
+section .boot.bss nobits
 align 4096
 
 global boot_pml4
@@ -370,3 +370,6 @@ global kernel_stack_bottom, kernel_stack_top
 kernel_stack_bottom:
     resb 65536          ; 64KB kernel stack
 kernel_stack_top:
+
+; Mark stack as non-executable (suppresses GNU-stack linker warning)
+section .note.GNU-stack noalloc noexec nowrite progbits

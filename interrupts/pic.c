@@ -24,6 +24,7 @@ void pic_init(void)
     /* Save existing interrupt masks */
     uint8_t mask1 = inb(PIC1_DATA);
     uint8_t mask2 = inb(PIC2_DATA);
+    (void)mask1; (void)mask2;
 
     /* Start PIC initialization sequence (cascade mode) */
     outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);

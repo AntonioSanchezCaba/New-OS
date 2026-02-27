@@ -156,7 +156,7 @@ static void calc_press(calc_t* c, uint8_t bid)
     if (c->error) return;
 
     /* Digits and decimal point */
-    if ((bid >= BID_0 && bid <= BID_9) || bid == BID_DOT) {
+    if (bid <= BID_9 || bid == BID_DOT) {
         if (c->need_reset) {
             strncpy(c->display, "0", sizeof(c->display) - 1);
             c->has_decimal = false; c->decimal_pos = 0; c->need_reset = false;

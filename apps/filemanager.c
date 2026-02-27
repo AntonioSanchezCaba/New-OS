@@ -411,8 +411,8 @@ static void fm_on_event(wid_t wid, gui_event_t* evt, void* ud)
     }
 
     case GUI_EVENT_KEY_DOWN: {
-        uint8_t kc = evt->key.keycode;
-        char ch    = evt->key.ch;
+        int kc  = evt->key.keycode;
+        char ch = evt->key.ch;
 
         if (kc == KEY_UP_ARROW) {
             if (f->selected > 0) f->selected--;

@@ -8,6 +8,7 @@
 #include <net/net.h>
 #include <net/ip.h>
 #include <net/tcp.h>
+#include <net/udp.h>
 #include <drivers/timer.h>
 #include <string.h>
 #include <kernel.h>

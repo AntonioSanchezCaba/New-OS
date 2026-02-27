@@ -241,6 +241,7 @@ int ata_write(ata_drive_t* drive, uint64_t lba, uint16_t count, const void* buf)
 static void ata_probe_drive(int bus_idx, int drive_idx,
                              uint16_t base, uint16_t ctrl)
 {
+    (void)bus_idx;
     ata_drive_t* d = &ata_drives[ata_drive_count];
 
     d->base   = base;
