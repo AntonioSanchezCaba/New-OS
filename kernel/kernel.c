@@ -144,6 +144,33 @@ void kernel_main(struct multiboot2_info* mb2_info)
     vmm_init();                                  /* [STABLE] */
     kinfo("[BOOT] VMM OK");
 
+    /* Early framebuffer stripe test (identity-map access, pre-heap).
+     * Writes three 4-pixel-tall colour bands directly to VRAM through
+     * the 0–4 GB identity map established by vmm_init().  If v86 shows
+     * a red/green/blue stripe at the top of the screen the VRAM path
+     * is confirmed working before fb_init() or the heap are set up.   */
+    {
+        struct multiboot2_tag_framebuffer* _fbt =
+            (struct multiboot2_tag_framebuffer*)
+            multiboot2_find_tag(mb2_info, MULTIBOOT2_TAG_FRAMEBUFFER);
+        if (_fbt && _fbt->framebuffer_type == 1 &&
+            _fbt->framebuffer_bpp == 32) {
+            volatile uint32_t* _vram =
+                (volatile uint32_t*)(uintptr_t)_fbt->framebuffer_addr;
+            uint32_t _w  = _fbt->framebuffer_width;
+            uint32_t _p  = _fbt->framebuffer_pitch / 4; /* stride in px */
+            uint32_t _colours[3] = {
+                0xFFFF0000u, /* red   */
+                0xFF00FF00u, /* green */
+                0xFF0000FFu  /* blue  */
+            };
+            for (int _row = 0; _row < 3; _row++)
+                for (uint32_t _x = 0; _x < _w; _x++)
+                    _vram[(uint32_t)_row * _p + _x] = _colours[_row];
+            kinfo("[BOOT] Identity-map VRAM stripe test written");
+        }
+    }
+
     kinfo("Initializing kernel heap (64 MB)...");
     heap_init(KERNEL_HEAP_START, 64 * 1024 * 1024); /* [STABLE] */
     kinfo("[BOOT] Heap OK");
