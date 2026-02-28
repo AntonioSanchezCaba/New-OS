@@ -62,8 +62,8 @@ uint8_t pmm_get_refcount(uint64_t phys);
 /* Guard page sits one page below the stack mapping */
 #define USER_STACK_GUARD    (USER_STACK_TOP - USER_STACK_SIZE - PAGE_SIZE)
 
-#define KERNEL_HEAP_START   0xFFFFFFFF90000000ULL
-#define KERNEL_HEAP_END     0xFFFFFFFFA0000000ULL
+#define KERNEL_HEAP_START   0xFFFFFE0000000000ULL   /* PML4[508] — clear of vmm_init huge pages */
+#define KERNEL_HEAP_END     0xFFFFFE0040000000ULL   /* +64 MB */
 
 /* Framebuffer MMIO virtual window (PML4 index 510, avoids KERNEL_VMA_BASE overflow
  * for physical addresses >= 2GB such as the QEMU Bochs VBE framebuffer at 0xFD000000) */

@@ -76,8 +76,11 @@ static int expand_heap(size_t min_size)
     for (uint64_t addr = heap_current; addr < heap_current + needed; addr += PAGE_SIZE) {
         void* phys = pmm_alloc_frame();
         if (!phys) return -1;
-        vmm_map_page(kernel_pml4, addr, (uint64_t)phys,
-                     PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL);
+        if (vmm_map_page(kernel_pml4, addr, (uint64_t)phys,
+                         PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL) != 0) {
+            pmm_free_frame(phys);
+            return -1;
+        }
     }
 
     /* Create a free block covering the new region */

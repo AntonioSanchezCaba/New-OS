@@ -62,6 +62,8 @@ static page_table_t* get_or_create_table(page_table_t* parent, int idx,
     uint64_t entry = parent->entries[idx];
 
     if (entry & PTE_PRESENT) {
+        /* Huge page — cannot walk further into it */
+        if (entry & PTE_HUGE) return NULL;
         /* Table already exists - return its virtual address */
         uint64_t phys = entry & PTE_ADDR_MASK;
         return (page_table_t*)PHYS_TO_VIRT(phys);
