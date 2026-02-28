@@ -44,19 +44,30 @@ void fb_init(struct multiboot2_tag_framebuffer* fb_tag)
         return;
     }
 
-    /* Map the physical framebuffer into kernel virtual address space */
+    /* Map the physical framebuffer into kernel virtual address space.
+     *
+     * IMPORTANT: do NOT use phys + KERNEL_VMA_BASE here.  The framebuffer
+     * is typically placed by the firmware/BIOS above 2 GB (e.g. 0xFD000000
+     * for QEMU Bochs VBE).  Adding KERNEL_VMA_BASE (0xFFFFFFFF80000000)
+     * to such an address causes a 64-bit wrap-around, producing a low
+     * virtual address that aliases the identity map and sends all pixel
+     * writes to RAM rather than VRAM.
+     *
+     * Instead, use FB_VIRT_BASE (PML4 entry 510, 0xFFFFFF0000000000) which
+     * is a clean virtual window reserved exclusively for framebuffer MMIO.
+     */
     size_t fb_bytes = (size_t)pitch * h;
     size_t pages    = ALIGN_UP(fb_bytes, PAGE_SIZE) / PAGE_SIZE;
 
     for (size_t p = 0; p < pages; p++) {
-        uint64_t paddr = phys + p * PAGE_SIZE;
-        /* Mark these frames as used in the PMM (they are device memory) */
-        vmm_map_page(kernel_pml4, paddr + KERNEL_VMA_BASE, paddr,
+        uint64_t paddr = phys + (uint64_t)p * PAGE_SIZE;
+        uint64_t vaddr = FB_VIRT_BASE + (uint64_t)p * PAGE_SIZE;
+        vmm_map_page(kernel_pml4, vaddr, paddr,
                      PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL |
                      PTE_CACHE_DISABLE);
     }
 
-    fb.phys_addr = (uint32_t*)(phys + KERNEL_VMA_BASE);
+    fb.phys_addr = (uint32_t*)FB_VIRT_BASE;
     fb.width     = w;
     fb.height    = h;
     fb.pitch     = pitch;

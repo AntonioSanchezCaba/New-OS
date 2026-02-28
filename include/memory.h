@@ -65,6 +65,10 @@ uint8_t pmm_get_refcount(uint64_t phys);
 #define KERNEL_HEAP_START   0xFFFFFFFF90000000ULL
 #define KERNEL_HEAP_END     0xFFFFFFFFA0000000ULL
 
+/* Framebuffer MMIO virtual window (PML4 index 510, avoids KERNEL_VMA_BASE overflow
+ * for physical addresses >= 2GB such as the QEMU Bochs VBE framebuffer at 0xFD000000) */
+#define FB_VIRT_BASE        0xFFFFFF0000000000ULL
+
 /* User pointer validation: check ptr is within user space */
 #define IS_USER_PTR(p)  ((uint64_t)(p) >= USER_SPACE_START && \
                          (uint64_t)(p) <  USER_SPACE_END)
