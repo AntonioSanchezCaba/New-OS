@@ -22,8 +22,8 @@
 bootanim_state_t g_bootanim;
 
 /* ── Colors ──────────────────────────────────────────────────────────── */
-#define BA_BG        0xFF0A0E1Au
-#define BA_RING_BG   0xFF1A2240u
+#define BA_BG        0xFF1E3A6Eu   /* medium blue — clearly visible, not black */
+#define BA_RING_BG   0xFF2A4E88u
 #define BA_RING_FG   0xFF4A8EFFu
 #define BA_RING_ACC  0xFF7BB8FFu
 #define BA_TEXT      0xFFEEF2FFu

@@ -184,6 +184,13 @@ void kernel_main(struct multiboot2_info* mb2_info)
             kinfo("[BOOT] Framebuffer OK — %ux%u @ %ubpp",
                   fb_tag->framebuffer_width, fb_tag->framebuffer_height,
                   fb_tag->framebuffer_bpp);
+            /* Immediate VRAM smoke test: paint solid blue before any other
+             * code runs, so the user sees colour the moment fb works.
+             * This also ensures at least one frame is visible even if the
+             * timer-based boot animation encounters issues. */
+            fb_clear(0xFF1A3B70u);   /* medium-dark blue — clearly not black */
+            fb_flip();
+            kinfo("[BOOT] Framebuffer smoke test flushed (should see blue)");
             kinfo("Initializing PS/2 mouse...");
             mouse_init();                        /* [STABLE] */
             kinfo("Initializing software cursor...");

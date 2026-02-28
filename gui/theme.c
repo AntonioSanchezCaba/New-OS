@@ -195,9 +195,9 @@ static void apply_accent(void)
 
 void theme_init(void)
 {
-    g_theme_id  = THEME_DARK;
+    g_theme_id  = THEME_LIGHT;
     g_accent_id = ACCENT_BLUE;
-    g_current   = theme_dark;
+    g_current   = theme_light;
     apply_accent();
 }
 
