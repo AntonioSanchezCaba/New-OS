@@ -31,8 +31,8 @@ void fs_demo_run(void)
     /* --------------------------------------------------
      * 2. Write a file
      * -------------------------------------------------- */
-    file_t* f = vfs_open("/mnt/hd0p0/testdir/hello.txt",
-                         VFS_FLAG_WRITE | VFS_FLAG_CREATE);
+    vfs_node_t* f = vfs_open("/mnt/hd0p0/testdir/hello.txt",
+                              O_WRONLY | O_CREAT);
     if (!f) {
         klog_warn("fs_demo: open for write failed");
         return;
@@ -40,18 +40,18 @@ void fs_demo_run(void)
 
     const char* msg  = "Hello from AetherFS!\nPersistent write test.\n";
     uint32_t    wlen = (uint32_t)strlen(msg);
-    uint32_t    wrote = vfs_write(f, 0, wlen, (uint8_t*)msg);
+    ssize_t     wrote = vfs_write(f, 0, wlen, msg);
     vfs_close(f);
 
-    if (wrote == wlen)
-        klog_info("fs_demo: wrote %u bytes to hello.txt  OK", wrote);
+    if ((uint32_t)wrote == wlen)
+        klog_info("fs_demo: wrote %u bytes to hello.txt  OK", wlen);
     else
-        klog_warn("fs_demo: partial write %u/%u", wrote, wlen);
+        klog_warn("fs_demo: partial write %ld/%u", (long)wrote, wlen);
 
     /* --------------------------------------------------
      * 3. Read the file back and verify
      * -------------------------------------------------- */
-    f = vfs_open("/mnt/hd0p0/testdir/hello.txt", VFS_FLAG_READ);
+    f = vfs_open("/mnt/hd0p0/testdir/hello.txt", O_RDONLY);
     if (!f) {
         klog_warn("fs_demo: open for read failed");
         return;
@@ -59,13 +59,13 @@ void fs_demo_run(void)
 
     char buf[128];
     memset(buf, 0, sizeof(buf));
-    uint32_t got = vfs_read(f, 0, wlen, (uint8_t*)buf);
+    ssize_t got = vfs_read(f, 0, wlen, buf);
     vfs_close(f);
 
-    if (got == wlen && memcmp(buf, msg, wlen) == 0)
+    if ((uint32_t)got == wlen && memcmp(buf, msg, wlen) == 0)
         klog_info("fs_demo: read-back verified  OK");
     else
-        klog_warn("fs_demo: read-back mismatch (got %u bytes)", got);
+        klog_warn("fs_demo: read-back mismatch (got %ld bytes)", (long)got);
 
     /* --------------------------------------------------
      * 4. List the directory
@@ -90,23 +90,22 @@ void fs_demo_run(void)
     /* --------------------------------------------------
      * 6. Write a second, larger file (multi-block test)
      * -------------------------------------------------- */
-    f = vfs_open("/mnt/hd0p0/bigfile.bin",
-                 VFS_FLAG_WRITE | VFS_FLAG_CREATE);
+    f = vfs_open("/mnt/hd0p0/bigfile.bin", O_WRONLY | O_CREAT);
     if (f) {
         /* Write 4 KB across 4 blocks */
         uint8_t pattern[4096];
         for (int i = 0; i < 4096; i++)
             pattern[i] = (uint8_t)(i & 0xFF);
-        uint32_t bw = vfs_write(f, 0, sizeof(pattern), pattern);
+        ssize_t bw = vfs_write(f, 0, sizeof(pattern), pattern);
         vfs_close(f);
-        klog_info("fs_demo: multi-block write  %u/4096 bytes  %s",
-                  bw, bw == 4096 ? "OK" : "FAIL");
+        klog_info("fs_demo: multi-block write  %ld/4096 bytes  %s",
+                  (long)bw, bw == 4096 ? "OK" : "FAIL");
 
         /* Read back and spot-check */
-        f = vfs_open("/mnt/hd0p0/bigfile.bin", VFS_FLAG_READ);
+        f = vfs_open("/mnt/hd0p0/bigfile.bin", O_RDONLY);
         if (f) {
             uint8_t rbuf[4096];
-            uint32_t rb = vfs_read(f, 0, sizeof(rbuf), rbuf);
+            ssize_t rb = vfs_read(f, 0, sizeof(rbuf), rbuf);
             vfs_close(f);
             bool ok = (rb == 4096);
             for (int i = 0; i < 4096 && ok; i++)

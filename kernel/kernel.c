@@ -5,15 +5,18 @@
  * sets up long mode and switches to the higher-half virtual address.
  *
  * Initialization order:
- *   Phase 1  — Serial + VGA (output only)
- *   Phase 2  — PMM + VMM + Heap
- *   Phase 3  — CPU structures (GDT, IDT, PIC)
- *   Phase 4  — Drivers (timer, keyboard, ATA, framebuffer, mouse, PCI)
- *   Phase 5  — Aether Kernel Layer (cap, IPC, svcbus, secmon, buddy)
- *   Phase 6  — Core Services (compositor, input service, launcher)
- *   Phase 7  — Filesystem + networking
- *   Phase 8  — Process manager + scheduler
- *   Phase 9  — Enable interrupts + start userland
+ *   Phase 1  — Serial + VGA (output only, no memory allocation)
+ *   Phase 2  — CPU structures: GDT/TSS, IDT, PIC  ← MUST precede memory
+ *              (any exception during PMM/VMM needs IDT to handle it;
+ *               without IDT a page-fault triple-faults the machine)
+ *   Phase 3  — Memory management: PMM, VMM, Heap
+ *   Phase 4  — Drivers: timer, keyboard, ATA, framebuffer, mouse, PCI
+ *   Phase 5  — Aether Kernel Layer: cap, IPC, svcbus, secmon, buddy
+ *   Phase 6  — Filesystem + disk manager + networking
+ *   Phase 7  — Process manager + scheduler + TTY
+ *   Phase 8  — Syscall interface
+ *   Phase 9  — Enable interrupts + launch userland
+ *   Phase 10 — Boot animation + Aether Render Engine
  */
 #include <kernel.h>
 #include <kernel/version.h>
@@ -95,49 +98,73 @@ static void bootanim_timer_cb(uint64_t ticks __attribute__((unused)))
  */
 void kernel_main(struct multiboot2_info* mb2_info)
 {
-    /* === Phase 1: Essential output (before memory management) === */
-    serial_init(COM1_PORT, UART_BAUD_115200);
-    vga_init();
+    /* === Phase 1: Essential output (no memory, no interrupts) === */
+    serial_init(COM1_PORT, UART_BAUD_115200);   /* [STABLE] */
+    vga_init();                                  /* [STABLE] */
     print_banner();
 
     debug_puts("[boot] Kernel entered 64-bit long mode\n");
     kinfo(OS_BANNER " — " OS_TAGLINE);
     kinfo("Multiboot2 info at %p", (void*)mb2_info);
+    kinfo("[BOOT] Serial + VGA OK");
 
-    /* === Phase 2: Memory management === */
     kernel_state = KERNEL_STATE_INIT;
 
+    /* === Phase 2: CPU structures BEFORE memory management ===
+     *
+     * GDT/IDT/PIC must be set up before pmm_init() runs.  The PMM and VMM
+     * touch large memory regions; any CPU exception (page fault, GPF) during
+     * that work requires a live IDT to dispatch the handler.  Without it the
+     * CPU triple-faults and resets.
+     */
+    kinfo("Initializing GDT/TSS...");
+    gdt_init();                                  /* [STABLE] */
+    kinfo("[BOOT] GDT/TSS OK");
+
+    kinfo("Initializing IDT (256 vectors)...");
+    idt_init();                                  /* [STABLE] */
+    kinfo("[BOOT] IDT OK");
+
+    kinfo("Initializing PIC (8259A — IRQs remapped to 0x20-0x2F)...");
+    pic_init();                                  /* [STABLE] */
+    kinfo("[BOOT] PIC OK");
+
+    /* === Phase 3: Memory management (IDT is live, exceptions are safe) === */
     kinfo("Initializing physical memory manager...");
-    pmm_init(mb2_info);
-    kinfo("PMM: %u MB free (%u frames)",
+    pmm_init(mb2_info);                          /* [STABLE] */
+    kinfo("[BOOT] PMM OK — %u MB free (%u frames)",
           (uint32_t)(pmm_free_frames_count() * PAGE_SIZE / (1024*1024)),
           (uint32_t)pmm_free_frames_count());
 
     kinfo("Initializing virtual memory manager...");
-    vmm_init();
+    /*
+     * NOTE: vmm.c intentionally includes process.h for COW fork semantics.
+     * This is a design-level cross-layer dependency, not a bug.
+     */
+    vmm_init();                                  /* [STABLE] */
+    kinfo("[BOOT] VMM OK");
 
-    kinfo("Initializing kernel heap...");
-    heap_init(KERNEL_HEAP_START, 64 * 1024 * 1024); /* 64MB heap */
-
-    /* === Phase 3: CPU structures === */
-    kinfo("Initializing GDT/TSS...");
-    gdt_init();
-
-    kinfo("Initializing IDT...");
-    idt_init();
-
-    kinfo("Initializing PIC...");
-    pic_init();
+    kinfo("Initializing kernel heap (64 MB)...");
+    heap_init(KERNEL_HEAP_START, 64 * 1024 * 1024); /* [STABLE] */
+    kinfo("[BOOT] Heap OK");
 
     /* === Phase 4: Drivers === */
     kinfo("Initializing timer (PIT at %u Hz)...", TIMER_FREQ);
-    timer_init(TIMER_FREQ);
+    /*
+     * NOTE: timer.c depends on scheduler.h to call scheduler_tick() from
+     * the IRQ0 handler.  This is an intentional driver→scheduler coupling
+     * required for preemptive round-robin scheduling.
+     */
+    timer_init(TIMER_FREQ);                      /* [STABLE] */
+    kinfo("[BOOT] Timer (PIT) OK — %u Hz", TIMER_FREQ);
 
     kinfo("Initializing PS/2 keyboard...");
-    keyboard_init();
+    keyboard_init();                             /* [STABLE] */
+    kinfo("[BOOT] Keyboard OK");
 
     kinfo("Initializing ATA disk controller...");
-    ata_init();
+    ata_init();                                  /* [STABLE] */
+    kinfo("[BOOT] ATA OK");
 
     /* === Phase 4b: Framebuffer and GUI input === */
     struct multiboot2_tag_framebuffer* fb_tag =
@@ -151,20 +178,24 @@ void kernel_main(struct multiboot2_info* mb2_info)
               (unsigned long long)fb_tag->framebuffer_addr);
         /* Try UEFI GOP via Multiboot2 first */
         gop_info_t gop_info;
-        uefi_gop_init(mb2_info, &gop_info);
-        fb_init(fb_tag);
+        uefi_gop_init(mb2_info, &gop_info);      /* [STABLE] */
+        fb_init(fb_tag);                         /* [STABLE] */
         if (fb_ready()) {
+            kinfo("[BOOT] Framebuffer OK — %ux%u @ %ubpp",
+                  fb_tag->framebuffer_width, fb_tag->framebuffer_height,
+                  fb_tag->framebuffer_bpp);
             kinfo("Initializing PS/2 mouse...");
-            mouse_init();
+            mouse_init();                        /* [STABLE] */
             kinfo("Initializing software cursor...");
-            cursor_init();
-            cursor_show();   /* make cursor visible from first frame */
+            cursor_init();                       /* [STABLE] */
+            cursor_show();
             kinfo("Initializing wallpaper engine...");
-            wallpaper_init();
+            wallpaper_init();                    /* [PARTIAL] — static BMP only */
             kinfo("Initializing window animations...");
-            anim_init();
+            anim_init();                         /* [PARTIAL] — alpha only */
             kinfo("Initializing Aether Render Engine...");
-            are_init();
+            are_init();                          /* [STABLE] */
+            kinfo("[BOOT] GUI stack OK");
             /* Pre-register boot animation steps.  The animation itself
              * starts after cpu_sti() when the timer ISR fires.        */
             bootanim_add_step("Initializing hardware...",    1);
@@ -183,19 +214,19 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("--- " OS_NAME " Kernel Layer ---");
 
     kinfo("Initializing capability security table...");
-    cap_table_init();
+    cap_table_init();                            /* [STABLE] */
 
     kinfo("Initializing security monitor...");
-    secmon_init();
+    secmon_init();                               /* [STABLE] */
 
     kinfo("Initializing IPC engine...");
-    ipc_init();
+    ipc_init();                                  /* [STABLE] */
 
     kinfo("Initializing service bus...");
-    svcbus_init();
+    svcbus_init();                               /* [STABLE] */
 
     kinfo("Initializing shared memory subsystem...");
-    shm_init();
+    shm_init();                                  /* [STABLE] */
 
     /* Buddy allocator: seed with 16MB starting above the kernel heap */
     {
@@ -204,84 +235,95 @@ void kernel_main(struct multiboot2_info* mb2_info)
         uint64_t buddy_size      = 16 * 1024 * 1024;  /* 16 MB */
         kinfo("Initializing buddy allocator (16 MB at phys 0x%llx)...",
               (unsigned long long)buddy_base_phys);
-        buddy_init(buddy_base_phys, buddy_base_virt, buddy_size);
+        buddy_init(buddy_base_phys, buddy_base_virt, buddy_size); /* [STABLE] */
     }
 
-    kinfo("--- " OS_NAME " Kernel Layer ready ---");
-    kinfo("  Capabilities : active=%u", cap_count());
+    kinfo("[BOOT] Kernel Layer OK — caps=%u  buddy=%llu KB",
+          cap_count(), (unsigned long long)(buddy_free_bytes() / 1024));
     kinfo("  IPC ports    : initialized");
     kinfo("  Service bus  : initialized");
-    kinfo("  Buddy memory : %llu KB free",
-          (unsigned long long)(buddy_free_bytes() / 1024));
 
     /* === Phase 4c: USB HID === */
     kinfo("Initializing USB (UHCI skeleton)...");
-    usb_init();
+    usb_init();                                  /* [STUB] — detects controller only */
+    kinfo("[BOOT] USB stub OK");
 
     /* === Phase 4d: PCI bus and network === */
     kinfo("Scanning PCI bus...");
-    pci_init();
+    pci_init();                                  /* [STABLE] */
+    kinfo("[BOOT] PCI scan OK");
 
     kinfo("Initializing e1000 Ethernet driver...");
-    if (e1000_init() == 0) {
+    if (e1000_init() == 0) {                     /* [STABLE] */
         kinfo("Initializing network stack...");
-        net_init();
+        net_init();                              /* [STABLE] */
         arp_announce();
+        kinfo("[BOOT] Network stack OK");
         kinfo("Starting DHCP discovery...");
-        if (dhcp_discover() == 0)
-            kinfo("DHCP: lease acquired");
+        if (dhcp_discover() == 0)                /* [PARTIAL] — IPv4 only */
+            kinfo("[BOOT] DHCP lease acquired");
         else
             klog_warn("DHCP: no lease (static IP or no DHCP server)");
     } else {
-        kinfo("No e1000 NIC found, networking disabled");
+        kinfo("[BOOT] No e1000 NIC found — networking disabled");
     }
 
-    /* === Phase 5: Filesystem + disk manager === */
+    /* === Phase 6: Filesystem + disk manager === */
     kinfo("Initializing VFS...");
-    vfs_init();
+    vfs_init();                                  /* [STABLE] */
 
     /* Mount ramfs as VFS root BEFORE diskman_init() calls vfs_mkdir("/mnt") */
     {
         extern vfs_node_t* ramfs_create_root(void);
-        vfs_mount_root(ramfs_create_root());
-        kinfo("VFS: ramfs mounted as root");
+        vfs_mount_root(ramfs_create_root());     /* [STABLE] */
+        kinfo("[BOOT] VFS + ramfs root OK");
     }
 
     kinfo("Scanning disks and mounting partitions...");
-    diskman_init();
+    diskman_init();                              /* [STABLE] */
+    kinfo("[BOOT] Disk manager OK — %d partitions", diskman_count());
 
     /* Mount proc filesystem at /proc */
     {
         extern void procfs_init(void);
-        procfs_init();
+        procfs_init();                           /* [PARTIAL] — read-only stubs */
+        kinfo("[BOOT] procfs OK");
     }
 
-    /* === Phase 6: Process subsystem === */
+    /* === Phase 7: Process subsystem === */
     kinfo("Initializing process manager...");
-    process_init();
+    process_init();                              /* [STABLE] */
+    kinfo("[BOOT] Process manager OK");
 
     kinfo("Initializing scheduler...");
-    scheduler_init();
+    scheduler_init();                            /* [STABLE] */
+    kinfo("[BOOT] Scheduler OK");
 
     kinfo("Initializing TTY subsystem...");
-    tty_init();
+    tty_init();                                  /* [STABLE] */
+    kinfo("[BOOT] TTY OK");
 
-    /* === Phase 6b: User accounts and package manager === */
+    /* === Phase 7b: User accounts and package manager === */
     kinfo("Initializing user account system...");
-    users_init();
+    users_init();                                /* [STABLE] */
+    kinfo("[BOOT] User accounts OK");
 
     kinfo("Initializing package manager (apkg)...");
-    apkg_init();
+    apkg_init();                                 /* [PARTIAL] — install/list only */
     kinfo("Initializing package manager (pkg/.aur)...");
-    pkg_init();
+    pkg_init();                                  /* [STUB] — AUR resolver placeholder */
+    kinfo("[BOOT] Package managers OK");
 
-    /* === Phase 7: Syscall interface === */
+    /* === Phase 8: Syscall interface === */
     kinfo("Initializing system call interface...");
-    syscall_init();
+    syscall_init();                              /* [STABLE] — 50+ calls via int 0x80 */
+    kinfo("[BOOT] Syscall interface OK");
 
-    /* === Phase 8: Enable interrupts and start scheduling === */
+    /* === Phase 9: Enable interrupts and start scheduling === */
     kernel_state = KERNEL_STATE_RUNNING;
-    kinfo("Kernel initialization complete. Enabling interrupts.");
+    kinfo("[BOOT] ========================================");
+    kinfo("[BOOT] All subsystems initialized. Enabling interrupts.");
+    kinfo("[BOOT] ========================================");
     cpu_sti();
 
     /* === Phase 9: Launch userland === */

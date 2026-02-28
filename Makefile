@@ -38,13 +38,25 @@ LD  := x86_64-elf-ld
 AS  := nasm
 OBJCOPY := x86_64-elf-objcopy
 
-# Fallback: if cross-compiler not found, try system compiler
+# Enforce cross-compiler — no silent fallback.
+# To explicitly allow the system compiler (e.g. on a native x86_64-linux host
+# where x86_64-linux-gnu-gcc produces freestanding code), run:
+#   make ALLOW_SYSTEM_GCC=1
+#
+# To install the cross-compiler:
+#   make cross-compiler          (builds from source, ~30 min)
+#   apt install gcc-x86-64-linux-gnu   (Debian/Ubuntu host compiler)
+ifneq ($(ALLOW_SYSTEM_GCC),1)
 ifeq ($(shell which $(CC) 2>/dev/null),)
-    CC  := gcc
-    CXX := g++
-    LD  := ld
+    $(error "$(CC) not found. Install x86_64-elf-gcc or run: make ALLOW_SYSTEM_GCC=1")
+endif
+else
+    # Explicit system-gcc override
+    CC      := gcc
+    CXX     := g++
+    LD      := ld
     OBJCOPY := objcopy
-    $(warning "x86_64-elf-gcc not found, using system compiler (may cause issues)")
+    $(warning "ALLOW_SYSTEM_GCC=1: using system compiler — kernel may not be fully freestanding")
 endif
 
 ##############################################################################
@@ -206,7 +218,10 @@ C_SRCS := \
     surfaces/explorer.c         \
     surfaces/sysmon.c           \
     surfaces/settings.c         \
-    surfaces/launcher.c
+    surfaces/launcher.c                 \
+    apps/fs_demo.c                      \
+    apps/net_demo.c                     \
+    apps/process_demo.c
 
 # All object files
 BOOT_OBJS := $(patsubst %.asm, $(BUILD)/%.o, \

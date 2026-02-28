@@ -200,8 +200,11 @@ phase3:
     memset(&msg, 0, sizeof(msg));
     msg.type       = 0xAE;         /* Aether message type sentinel */
     msg.sender_tid = owner_tid;
-    msg.data[0]    = 0xDEAD;
-    msg.data[1]    = 0xBEEF;
+    msg.data[0]    = 0xDE;         /* sentinel bytes: DE AD BE EF */
+    msg.data[1]    = 0xAD;
+    msg.data[2]    = 0xBE;
+    msg.data[3]    = 0xEF;
+    msg.data_len   = 4;
     msg.reply_port = PORT_INVALID;
 
     ipc_err_t send_err = ipc_send(port, &msg);
@@ -214,13 +217,14 @@ phase3:
     ipc_port_destroy(port);
 
     if (send_err == IPC_OK && recv_err == IPC_OK &&
-        out.type    == 0xAE   &&
-        out.data[0] == 0xDEAD &&
-        out.data[1] == 0xBEEF) {
-        kinfo("PROC-DEMO [3/4] PASS — msg type=0x%x data[0]=0x%llx data[1]=0x%llx",
+        out.type    == 0xAE &&
+        out.data[0] == 0xDE &&
+        out.data[1] == 0xAD &&
+        out.data[2] == 0xBE &&
+        out.data[3] == 0xEF) {
+        kinfo("PROC-DEMO [3/4] PASS — msg type=0x%x data=%02x %02x %02x %02x",
               (unsigned)out.type,
-              (unsigned long long)out.data[0],
-              (unsigned long long)out.data[1]);
+              out.data[0], out.data[1], out.data[2], out.data[3]);
     } else {
         kwarn("PROC-DEMO [3/4] FAIL — send=%d recv=%d type=0x%x",
               (int)send_err, (int)recv_err, (unsigned)out.type);
