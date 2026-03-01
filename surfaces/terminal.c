@@ -12,6 +12,7 @@
 #include <gui/draw.h>
 #include <gui/font.h>
 #include <gui/event.h>
+#include <gui/clipboard.h>
 #include <fs/vfs.h>
 #include <memory.h>
 #include <string.h>
@@ -67,6 +68,14 @@ typedef struct {
     char         line_buf[256];
     int          line_len;
     int          line_cursor;
+
+    /* Command history (ring buffer, most-recent at hist_head-1) */
+#define TERM_HIST_MAX  64
+    char         hist[TERM_HIST_MAX][256];
+    int          hist_count;   /* entries stored (0..TERM_HIST_MAX) */
+    int          hist_head;    /* next write slot (ring index) */
+    int          hist_pos;     /* browsing position; -1 = live input */
+    char         hist_save[256]; /* saved live input while browsing */
 
     /* Current colors */
     acolor_t     cur_fg;
@@ -225,7 +234,7 @@ static void shell_exec(const char* cmd)
     } else if (strncmp(cmd, "help", 4) == 0) {
         term_puts("Aether Shell — built-in commands:\r\n");
         term_puts("  help      — this message\r\n");
-        term_puts("  clear     — clear screen\r\n");
+        term_puts("  clear     — clear screen (also Ctrl+L)\r\n");
         term_puts("  version   — OS version\r\n");
         term_puts("  uname     — system info\r\n");
         term_puts("  echo ...  — echo text\r\n");
@@ -255,6 +264,13 @@ static void shell_exec(const char* cmd)
         term_puts("  repo      — list available packages\r\n");
         term_puts("  reboot    — reboot system\r\n");
         term_puts("  halt      — halt system\r\n");
+        term_puts("Keyboard shortcuts:\r\n");
+        term_puts("  Up/Down   — browse command history\r\n");
+        term_puts("  Ctrl+C    — cancel current input\r\n");
+        term_puts("  Ctrl+L    — clear screen\r\n");
+        term_puts("  Ctrl+V    — paste from clipboard\r\n");
+        term_puts("  Ctrl+A    — move to beginning of line\r\n");
+        term_puts("  Ctrl+E    — move to end of line\r\n");
     } else if (strncmp(cmd, "clear", 5) == 0) {
         for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
         g_term.cx = 0; g_term.cy = 0;
@@ -730,6 +746,25 @@ static void term_render(sid_t id, uint32_t* pixels, uint32_t w, uint32_t h,
 }
 
 /* =========================================================
+ * Command history helpers
+ * ========================================================= */
+
+/* Push a non-empty command into the history ring */
+static void hist_push(const char* cmd)
+{
+    if (!cmd || !cmd[0]) return;
+    /* Avoid duplicating the most-recent entry */
+    if (g_term.hist_count > 0) {
+        int prev = (g_term.hist_head - 1 + TERM_HIST_MAX) % TERM_HIST_MAX;
+        if (strcmp(g_term.hist[prev], cmd) == 0) return;
+    }
+    strncpy(g_term.hist[g_term.hist_head], cmd, 255);
+    g_term.hist[g_term.hist_head][255] = '\0';
+    g_term.hist_head = (g_term.hist_head + 1) % TERM_HIST_MAX;
+    if (g_term.hist_count < TERM_HIST_MAX) g_term.hist_count++;
+}
+
+/* =========================================================
  * Input callback
  * ========================================================= */
 static void term_input(sid_t id, const input_event_t* ev, void* ud)
@@ -737,18 +772,146 @@ static void term_input(sid_t id, const input_event_t* ev, void* ud)
     (void)id; (void)ud;
     if (ev->type != INPUT_KEY || !ev->key.down) return;
 
-    char ch  = ev->key.ch;
-    int  kc  = ev->key.keycode;
+    char    ch   = ev->key.ch;
+    int     kc   = ev->key.keycode;
+    uint8_t mods = ev->key.mods;
 
+    /* ── Ctrl key shortcuts ─────────────────────────────── */
+    if (mods & MOD_CTRL) {
+        char lo = (char)(ch | 0x20);   /* force lower-case */
+
+        if (lo == 'c') {
+            /* Ctrl+C — cancel current input */
+            term_puts("^C\r\n");
+            g_term.line_len    = 0;
+            g_term.line_cursor = 0;
+            memset(g_term.line_buf, 0, sizeof(g_term.line_buf));
+            g_term.hist_pos = -1;
+            shell_prompt();
+            surface_invalidate(id);
+            return;
+        }
+        if (lo == 'l') {
+            /* Ctrl+L — clear screen */
+            for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);
+            g_term.cx = 0; g_term.cy = 0;
+            shell_prompt();
+            surface_invalidate(id);
+            return;
+        }
+        if (lo == 'a') {
+            /* Ctrl+A — move to beginning of line */
+            for (int i = 0; i < g_term.line_len; i++)
+                term_putchar_raw('\b');
+            g_term.line_cursor = 0;
+            surface_invalidate(id);
+            return;
+        }
+        if (lo == 'e') {
+            /* Ctrl+E — move to end of line */
+            while (g_term.line_cursor < g_term.line_len) {
+                term_putchar_raw(g_term.line_buf[g_term.line_cursor]);
+                g_term.line_cursor++;
+            }
+            surface_invalidate(id);
+            return;
+        }
+        if (lo == 'v') {
+            /* Ctrl+V — paste from clipboard */
+            const char* clip = clipboard_get_text();
+            if (clip) {
+                for (; *clip && g_term.line_len < 255; clip++) {
+                    char pc = *clip;
+                    /* Strip non-printable except newline (treat as submit) */
+                    if (pc == '\n' || pc == '\r') {
+                        /* Insert as if Enter was pressed: submit line */
+                        g_term.line_buf[g_term.line_len] = '\0';
+                        term_putchar_raw('\n');
+                        hist_push(g_term.line_buf);
+                        shell_exec(g_term.line_buf);
+                        g_term.line_len    = 0;
+                        g_term.line_cursor = 0;
+                        memset(g_term.line_buf, 0, sizeof(g_term.line_buf));
+                        g_term.hist_pos = -1;
+                        shell_prompt();
+                        break;
+                    }
+                    if (pc < 0x20 || pc >= 0x7F) continue;
+                    g_term.line_buf[g_term.line_len++] = pc;
+                    g_term.line_cursor = g_term.line_len;
+                    term_putchar_raw(pc);
+                }
+            }
+            surface_invalidate(id);
+            return;
+        }
+        /* Other Ctrl combos: ignore */
+        return;
+    }
+
+    /* ── Arrow keys: command history navigation ─────────── */
+    if (kc == KEY_UP_ARROW) {
+        if (g_term.hist_count == 0) { surface_invalidate(id); return; }
+        if (g_term.hist_pos == -1) {
+            /* Save current live input */
+            memcpy(g_term.hist_save, g_term.line_buf, sizeof(g_term.hist_save));
+            g_term.hist_pos = 0;
+        } else if (g_term.hist_pos < g_term.hist_count - 1) {
+            g_term.hist_pos++;
+        }
+        /* Load history entry */
+        int slot = (g_term.hist_head - 1 - g_term.hist_pos + TERM_HIST_MAX * 2)
+                   % TERM_HIST_MAX;
+        /* Erase current and repaint */
+        for (int i = 0; i < g_term.line_len; i++) {
+            term_putchar_raw('\b'); term_putchar_raw(' '); term_putchar_raw('\b');
+        }
+        strncpy(g_term.line_buf, g_term.hist[slot], 255);
+        g_term.line_buf[255] = '\0';
+        g_term.line_len    = (int)strlen(g_term.line_buf);
+        g_term.line_cursor = g_term.line_len;
+        for (int i = 0; i < g_term.line_len; i++)
+            term_putchar_raw(g_term.line_buf[i]);
+        surface_invalidate(id);
+        return;
+    }
+    if (kc == KEY_DOWN_ARROW) {
+        if (g_term.hist_pos == -1) { surface_invalidate(id); return; }
+        /* Erase current */
+        for (int i = 0; i < g_term.line_len; i++) {
+            term_putchar_raw('\b'); term_putchar_raw(' '); term_putchar_raw('\b');
+        }
+        if (g_term.hist_pos == 0) {
+            /* Restore saved live input */
+            memcpy(g_term.line_buf, g_term.hist_save, sizeof(g_term.line_buf));
+            g_term.hist_pos = -1;
+        } else {
+            g_term.hist_pos--;
+            int slot = (g_term.hist_head - 1 - g_term.hist_pos + TERM_HIST_MAX * 2)
+                       % TERM_HIST_MAX;
+            strncpy(g_term.line_buf, g_term.hist[slot], 255);
+            g_term.line_buf[255] = '\0';
+        }
+        g_term.line_len    = (int)strlen(g_term.line_buf);
+        g_term.line_cursor = g_term.line_len;
+        for (int i = 0; i < g_term.line_len; i++)
+            term_putchar_raw(g_term.line_buf[i]);
+        surface_invalidate(id);
+        return;
+    }
+
+    /* ── Normal input ───────────────────────────────────── */
     if (kc == KEY_ENTER || kc == '\r' || kc == '\n' || ch == '\r' || ch == '\n') {
         /* Echo newline */
         g_term.line_buf[g_term.line_len] = '\0';
         term_putchar_raw('\n');
-        /* Execute */
+        /* Save to history and execute */
+        hist_push(g_term.line_buf);
         shell_exec(g_term.line_buf);
         g_term.line_len    = 0;
         g_term.line_cursor = 0;
         memset(g_term.line_buf, 0, sizeof(g_term.line_buf));
+        g_term.hist_pos    = -1;
         shell_prompt();
     } else if (kc == KEY_BACKSPACE || ch == '\b') {
         if (g_term.line_len > 0) {
@@ -763,6 +926,8 @@ static void term_input(sid_t id, const input_event_t* ev, void* ud)
         g_term.line_buf[g_term.line_len++] = ch;
         g_term.line_cursor = g_term.line_len;
         term_putchar_raw(ch);
+        /* Any typing resets history browsing */
+        g_term.hist_pos = -1;
     }
 
     surface_invalidate(id);
@@ -779,6 +944,7 @@ void surface_terminal_init(uint32_t w, uint32_t h)
     g_term.cwd[0] = '/'; g_term.cwd[1] = '\0';
     g_term.surf_w  = w;
     g_term.surf_h  = h;
+    g_term.hist_pos = -1;
 
     /* Clear all rows */
     for (int r = 0; r < TERM_ROWS; r++) term_clear_row(r);

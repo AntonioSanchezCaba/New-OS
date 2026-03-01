@@ -116,7 +116,7 @@ what the status of each subsystem is.
 | ramfs                | **STABLE**  | In-memory; dynamic growth; pre-populated tree      |
 | ext2                 | **PARTIAL** | Read-write on in-memory image; no write-back to disk|
 | FAT32                | **PARTIAL** | BPB parse; FAT chain walk; LFN read; limited write |
-| procfs               | **PARTIAL** | `/proc` stub entries; read-only; no live data yet  |
+| procfs               | **PARTIAL** | `/proc/{uptime,meminfo,version,<pid>/status}`; live |
 | Disk manager         | **STABLE**  | MBR scan; FAT32/ext2 auto-mount under `/mnt/`      |
 | Block cache          | **STABLE**  | LRU sector cache shared across ATA + filesystems   |
 
@@ -142,13 +142,13 @@ what the status of each subsystem is.
 | Widget toolkit       | **STABLE**  | Button, Label, TextInput, CheckBox, ProgressBar    |
 | Theme engine         | **STABLE**  | Dark/light; accent colours; `gui/theme.c`          |
 | Notifications        | **STABLE**  | Toast popups; auto-dismiss; severity levels        |
-| Wallpaper engine     | **PARTIAL** | Static colour fill; no BMP/PNG loader yet          |
+| Wallpaper engine     | **PARTIAL** | Gradient + solid + BMP/PPM image load; no PNG yet  |
 | Window animations    | **PARTIAL** | Alpha-fade only; no slide/scale yet                |
 | Boot animation       | **STABLE**  | Integer sine table; fade-in / progress / fade-out  |
 | Boot splash          | **STABLE**  | Branded progress bar; step labels                  |
 | Login screen         | **STABLE**  | Username / password fields; blinking cursor        |
 | Desktop + taskbar    | **STABLE**  | Start menu; virtual workspaces; system tray slots  |
-| Clipboard            | **STUB**    | API present; no cross-window data transfer yet     |
+| Clipboard            | **PARTIAL** | Global text/binary buffer; Ctrl+V paste in terminal|
 
 ### Applications
 
@@ -156,7 +156,7 @@ All applications run in ring 0 (kernel space). No user-space isolation.
 
 | Application          | Status      | Notes                                              |
 |----------------------|-------------|----------------------------------------------------|
-| Terminal             | **STABLE**  | 22 built-in commands; history; VFS navigation      |
+| Terminal             | **STABLE**  | 30+ built-in commands; Ctrl shortcuts; cmd history |
 | File Manager         | **STABLE**  | Two-pane; sidebar; delete confirmation             |
 | Text Editor          | **STABLE**  | Multi-line; line numbers; scroll                   |
 | System Monitor       | **STABLE**  | CPU %; memory bar; process list                    |
