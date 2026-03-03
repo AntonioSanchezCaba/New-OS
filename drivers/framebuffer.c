@@ -59,6 +59,23 @@ void fb_init(struct multiboot2_tag_framebuffer* fb_tag)
     fb.pitch     = pitch;
     fb.bpp       = bpp;
 
+    /* Remap the physical framebuffer MMIO pages as uncached (Write-Through +
+     * Cache-Disable) so writes bypass the CPU data cache and immediately
+     * reach the display device.  Required under KVM-accelerated QEMU where
+     * write-back cached stores to MMIO addresses are never intercepted by
+     * the hypervisor, causing a persistent black screen.                   */
+    {
+        uint64_t _p   = phys & ~(uint64_t)0x1FFFFF;    /* 2 MB align down */
+        uint64_t _end = ((phys + (uint64_t)pitch * h) + 0x1FFFFF) &
+                        ~(uint64_t)0x1FFFFF;
+        for (; _p < _end && _p < 0x100000000ULL; _p += 0x200000) {
+            vmm_map_page(kernel_pml4, _p, _p,
+                         PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL | PTE_HUGE |
+                         PTE_CACHE_DISABLE | PTE_WRITE_THROUGH);
+        }
+        kinfo("framebuffer: MMIO pages remapped as write-through/uncached");
+    }
+
     /* Allocate back buffer in kernel heap */
     fb.back_buf = (uint32_t*)kmalloc(w * h * sizeof(uint32_t));
     if (!fb.back_buf) {
@@ -150,6 +167,11 @@ void fb_flip(void)
     } else {
         _fb_blit_rows(0, fb.height, 0, (int)fb.width);
     }
+
+    /* Memory fence: ensure all VRAM stores are globally visible before we
+     * continue.  Critical when MMIO pages are write-through/uncached so the
+     * CPU store buffer is fully drained before the next frame starts.       */
+    __asm__ volatile("mfence" ::: "memory");
 
     fb.frame_count++;
     fb.damage_count = 0;
