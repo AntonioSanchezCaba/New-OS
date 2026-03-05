@@ -30,8 +30,8 @@
 #define PKG_DESC_MAX       256
 #define PKG_VER_MAX        32
 #define PKG_MAX_DEPS       16
-#define PKG_MAX_FILES      256
-#define PKG_MAX_INSTALLED  128
+#define PKG_MAX_FILES      32
+#define PKG_MAX_INSTALLED  16
 #define PKG_DB_PATH        "/sys/packages/db"
 #define PKG_CACHE_PATH     "/sys/packages/cache"
 #define PKG_INSTALL_ROOT   "/"

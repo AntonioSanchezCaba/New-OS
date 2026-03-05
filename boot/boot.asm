@@ -55,9 +55,24 @@ _start:
     ;; Disable interrupts immediately
     cli
 
+    ;; === Early serial debug: write 'A' to COM1 (0x3F8) ===
+    ;; Works even without full UART init — BIOS/GRUB leave UART usable.
+    ;; IMPORTANT: Must not clobber EAX (multiboot2 magic) or EBX (info ptr).
+    ;; Stack is not set up yet, so use ECX as scratch.
+    mov ecx, eax
+    mov dx, 0x3F8
+    mov al, 'A'
+    out dx, al
+    mov eax, ecx
+
     ;; Verify Multiboot2 magic
     cmp eax, 0x36D76289
     jne .no_multiboot
+
+    ;; Debug: 'B' — multiboot2 magic OK
+    mov dx, 0x3F8
+    mov al, 'B'
+    out dx, al
 
     ;; Save multiboot2 info pointer (EBX) to physical memory location.
     ;; boot.bss symbols have VMA = physical (no KERNEL_VMA_OFFSET), use directly.
@@ -74,10 +89,20 @@ _start:
     call check_long_mode
     jc .no_long_mode
 
+    ;; Debug: 'C' — CPU checks passed
+    mov dx, 0x3F8
+    mov al, 'C'
+    out dx, al
+
     ;; Set up initial page tables for:
     ;;   a) Identity-map of first 2GB (so boot code can continue running)
     ;;   b) Higher-half map at 0xFFFFFFFF80000000 -> physical 0
     call setup_page_tables
+
+    ;; Debug: 'D' — page tables set up
+    mov dx, 0x3F8
+    mov al, 'D'
+    out dx, al
 
     ;; Enable PAE (Physical Address Extension) - required for long mode
     mov eax, cr4
@@ -94,6 +119,11 @@ _start:
     or  eax, (1 << 8)   ; EFER.LME = 1
     or  eax, (1 << 11)  ; EFER.NXE = 1 (enable No-Execute bit)
     wrmsr
+
+    ;; Debug: 'E' — long mode configured
+    mov dx, 0x3F8
+    mov al, 'E'
+    out dx, al
 
     ;; Enable paging (which also activates long mode)
     mov eax, cr0
@@ -118,6 +148,26 @@ _start:
 .no_long_mode:
     mov esi, msg_no_long_mode
     jmp boot_error32
+
+;;; =========================================================
+;;; boot_serial_puts32 - write a string to COM1 (32-bit)
+;;; ESI = pointer to null-terminated string
+;;; Clobbers: EAX, EDX, ESI
+;;; =========================================================
+boot_serial_puts32:
+    mov dx, 0x3F8 + 5   ; LSR
+.wait_tx:
+    in  al, dx
+    test al, 0x20       ; THRE bit
+    jz  .wait_tx
+    mov dx, 0x3F8
+    lodsb
+    test al, al
+    jz   .done
+    out  dx, al
+    jmp  boot_serial_puts32
+.done:
+    ret
 
 ;;; =========================================================
 ;;; check_cpuid - verify CPUID instruction is available
@@ -229,6 +279,12 @@ setup_page_tables:
 ;;; ESI = pointer to null-terminated string (physical address)
 ;;; =========================================================
 boot_error32:
+    ;; Write error to serial first (visible in graphical mode)
+    push esi
+    call boot_serial_puts32
+    pop esi
+
+    ;; Also write to VGA text buffer (in case of text mode)
     mov edi, 0xB8000    ; VGA text buffer
     mov ah,  0x4F       ; White on red
 .loop:
@@ -325,6 +381,11 @@ section .text
 extern kernel_main
 
 long_mode_entry:
+    ;; Debug: 'F' — 64-bit long mode reached!
+    mov dx, 0x3F8
+    mov al, 'F'
+    out dx, al
+
     ;; We're now in 64-bit long mode!
     ;; Update all segment registers to use the kernel data segment
     mov ax, 0x10        ; Kernel data selector
@@ -348,6 +409,13 @@ long_mode_entry:
     ;; Access via identity map and add higher-half offset.
     mov rdi, [multiboot_info_ptr]
     add rdi, KERNEL_VMA_OFFSET
+
+    ;; Debug: 'G' — about to call kernel_main
+    push rdi
+    mov dx, 0x3F8
+    mov al, 'G'
+    out dx, al
+    pop rdi
 
     ;; Jump to kernel main (must be done via absolute address in higher half)
     call kernel_main

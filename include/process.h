@@ -14,8 +14,8 @@
 #include <kernel/cap.h>
 
 /* Maximum number of simultaneous processes */
-#define MAX_PROCESSES   256
-#define MAX_THREADS     1024
+#define MAX_PROCESSES   64
+#define MAX_THREADS     128
 
 /* Maximum filename length */
 #define MAX_PATH_LEN    256

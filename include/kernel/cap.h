@@ -57,7 +57,7 @@ typedef uint32_t cap_rights_t;
 
 typedef uint32_t cap_id_t;
 #define CAP_INVALID_ID   ((cap_id_t)0)
-#define CAP_TABLE_SIZE   4096    /* System-wide capability slots */
+#define CAP_TABLE_SIZE   256     /* System-wide capability slots */
 
 /* One entry in the global capability table */
 typedef struct cap {

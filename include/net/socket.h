@@ -83,7 +83,7 @@ typedef enum {
     SOCK_STATE_CLOSED,
 } sock_state_t;
 
-#define NET_SOCK_MAX      256
+#define NET_SOCK_MAX      32
 #define SOCK_BACKLOG_MAX  8
 #define SOCK_RXBUF_SIZE   8192
 

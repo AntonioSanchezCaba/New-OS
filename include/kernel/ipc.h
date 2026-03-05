@@ -25,8 +25,8 @@
 
 #define IPC_MSG_DATA_MAX    256     /* Maximum inline payload bytes */
 #define IPC_MSG_CAPS_MAX    4       /* Maximum caps per message */
-#define IPC_PORT_QUEUE_SIZE 64      /* Depth of per-port receive queue */
-#define IPC_MAX_PORTS       1024    /* System-wide port limit */
+#define IPC_PORT_QUEUE_SIZE 8       /* Depth of per-port receive queue */
+#define IPC_MAX_PORTS       64      /* System-wide port limit */
 #define IPC_TIMEOUT_FOREVER UINT32_MAX
 #define IPC_TIMEOUT_NONE    0       /* Non-blocking receive */
 
