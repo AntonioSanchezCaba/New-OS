@@ -59,12 +59,12 @@ _start:
     cmp eax, 0x36D76289
     jne .no_multiboot
 
-    ;; Save multiboot2 info pointer (EBX) to physical memory location
-    ;; (before we set up paging, so we use the physical address of the var)
-    mov [multiboot_info_ptr - KERNEL_VMA_OFFSET], ebx
+    ;; Save multiboot2 info pointer (EBX) to physical memory location.
+    ;; boot.bss symbols have VMA = physical (no KERNEL_VMA_OFFSET), use directly.
+    mov [multiboot_info_ptr], ebx
 
     ;; Set up the initial 32-bit stack (in boot BSS)
-    mov esp, (boot_stack_top - KERNEL_VMA_OFFSET)
+    mov esp, boot_stack_top
 
     ;; Check that CPUID is supported
     call check_cpuid
@@ -84,8 +84,8 @@ _start:
     or  eax, (1 << 5)   ; CR4.PAE
     mov cr4, eax
 
-    ;; Load PML4 into CR3
-    mov eax, boot_pml4 - KERNEL_VMA_OFFSET
+    ;; Load PML4 into CR3 (boot_pml4 physical address = VMA for boot.bss)
+    mov eax, boot_pml4
     mov cr3, eax
 
     ;; Enable Long Mode via the EFER MSR
@@ -101,22 +101,22 @@ _start:
     or  eax, (1 << 0)   ; CR0.PE = 1 (should already be set by GRUB)
     mov cr0, eax
 
-    ;; Load our 64-bit GDT
-    lgdt [gdt64_ptr - KERNEL_VMA_OFFSET]
+    ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
+    lgdt [gdt64_ptr]
 
     ;; Far jump to flush the pipeline and enter 64-bit code segment
     jmp 0x08:(long_mode_entry - KERNEL_VMA_OFFSET)
 
 .no_multiboot:
-    mov esi, msg_no_multiboot - KERNEL_VMA_OFFSET
+    mov esi, msg_no_multiboot   ; .boot.data: physical = VMA, no offset needed
     jmp boot_error32
 
 .no_cpuid:
-    mov esi, msg_no_cpuid - KERNEL_VMA_OFFSET
+    mov esi, msg_no_cpuid
     jmp boot_error32
 
 .no_long_mode:
-    mov esi, msg_no_long_mode - KERNEL_VMA_OFFSET
+    mov esi, msg_no_long_mode
     jmp boot_error32
 
 ;;; =========================================================
@@ -177,28 +177,31 @@ check_long_mode:
 ;;;   0x5000: PD  for higher-half -> same 2GB
 ;;; =========================================================
 setup_page_tables:
+    ;; All boot_* symbols are in .boot.bss: VMA = LMA = physical address.
+    ;; Do NOT subtract KERNEL_VMA_OFFSET — use them directly.
+
     ;; Clear all 5 page tables (5 * 4096 = 20480 bytes)
-    mov edi, boot_pml4 - KERNEL_VMA_OFFSET
+    mov edi, boot_pml4
     xor eax, eax
     mov ecx, (5 * 4096) / 4
     rep stosd
 
     ;; ---- PML4 ----
     ;; PML4[0] -> PDPT (identity map, covers 0x0 - 0x7FFFFFFF)
-    mov eax, boot_pdpt_low - KERNEL_VMA_OFFSET
+    mov eax, boot_pdpt_low
     or  eax, 3                              ; Present + RW
-    mov [boot_pml4 - KERNEL_VMA_OFFSET], eax
+    mov [boot_pml4], eax
 
     ;; PML4[511] -> PDPT (higher half: 0xFFFFFFFF80000000+)
-    mov eax, boot_pdpt_high - KERNEL_VMA_OFFSET
+    mov eax, boot_pdpt_high
     or  eax, 3
-    mov [boot_pml4 - KERNEL_VMA_OFFSET + 511*8], eax
+    mov [boot_pml4 + 511*8], eax
 
     ;; ---- Lower PDPT ----
     ;; PDPT[0] -> PD (first 1GB)
-    mov eax, boot_pd - KERNEL_VMA_OFFSET
+    mov eax, boot_pd
     or  eax, 3
-    mov [boot_pdpt_low - KERNEL_VMA_OFFSET], eax
+    mov [boot_pdpt_low], eax
 
     ;; ---- Higher PDPT ----
     ;; PDPT[510] -> PD (maps 0xFFFFFFFF80000000 to physical 0x0)
@@ -206,14 +209,14 @@ setup_page_tables:
     ;;   Virtual: 0xFFFF_FFFF_8000_0000
     ;;     PML4 index = (0xFFFF_FFFF_8000_0000 >> 39) & 0x1FF = 511
     ;;     PDPT index = (0xFFFF_FFFF_8000_0000 >> 30) & 0x1FF = 510
-    mov [boot_pdpt_high - KERNEL_VMA_OFFSET + 510*8], eax
+    mov [boot_pdpt_high + 510*8], eax
 
     ;; ---- Page Directory (shared by both PDPTs) ----
     ;; Map 512 * 2MB = 1GB using huge pages
     mov eax, 0x83       ; Present + RW + Huge (2MB)
     mov ecx, 0
 .fill_pd:
-    mov [boot_pd - KERNEL_VMA_OFFSET + ecx*8], eax
+    mov [boot_pd + ecx*8], eax
     add eax, 0x200000   ; Next 2MB
     inc ecx
     cmp ecx, 512
@@ -278,7 +281,7 @@ gdt64_end:
 
 gdt64_ptr:
     dw gdt64_end - gdt64 - 1   ; Limit
-    dq gdt64 - KERNEL_VMA_OFFSET ; Base (physical address, 64-bit field)
+    dq gdt64                    ; Base — gdt64 is in .boot.data (VMA = physical)
 
 ;;; =========================================================
 ;;; Page tables (4KB aligned, in boot BSS)
