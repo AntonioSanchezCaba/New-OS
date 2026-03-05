@@ -34,6 +34,7 @@
 #include <gui/notify.h>
 #include <services/login.h>
 #include <net/net.h>
+#include <net/tcp.h>
 #include <memory.h>
 #include <string.h>
 #include <kernel.h>
@@ -677,9 +678,10 @@ void are_run(void)
             last_ticks = now;
             g_frame++;
 
-            /* 1. Poll hardware input + NIC receive */
+            /* 1. Poll hardware input + NIC receive + TCP retransmit timer */
             input_poll();
             if (net_iface.poll) net_iface.poll();   /* drain e1000 RX ring */
+            tcp_tick();   /* retransmit unACKed segments whose RTO expired  */
 
             /* 2. Dispatch input → gestures / surfaces */
             are_dispatch_input();

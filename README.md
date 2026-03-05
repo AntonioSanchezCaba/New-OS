@@ -128,7 +128,7 @@ what the status of each subsystem is.
 | IPv4                 | **STABLE**  | Checksum; basic fragmentation; routing             |
 | ICMP                 | **STABLE**  | Echo request/reply (ping)                          |
 | UDP                  | **STABLE**  | Send/recv; port demultiplexing                     |
-| TCP                  | **PARTIAL** | 3-way handshake; send/recv; no retransmit timer    |
+| TCP                  | **PARTIAL** | 3-way handshake; send/recv; retransmit timer (RTO+backoff) |
 | BSD socket API       | **PARTIAL** | `socket/bind/connect/send/recv`; AF\_INET only     |
 | DHCP                 | **PARTIAL** | DISCOVER/OFFER/REQUEST/ACK; IPv4 only              |
 | DNS                  | **PARTIAL** | A-record query; no caching; no AAAA                |
@@ -164,8 +164,8 @@ All applications run in ring 0 (kernel space). No user-space isolation.
 | Calculator           | **STABLE**  | 4-function; %; keyboard input                      |
 | Clock                | **STABLE**  | Analog + digital face; uptime                      |
 | Stress test          | **STABLE**  | 6 scheduler workers; fairness bars                 |
-| Image viewer         | **STUB**    | Window created; no image decode                    |
-| Network config       | **STUB**    | UI skeleton only                                   |
+| Image viewer         | **PARTIAL** | BMP (24/32-bit) + PPM P6 decode; zoom/pan/fit      |
+| Network config       | **PARTIAL** | Live stats, DHCP renew, ICMP ping with RTT         |
 
 ### Package Managers
 
@@ -224,9 +224,10 @@ to verify the sequence.
 2. **ext2 is in-memory only.** The driver reads the partition into a heap buffer
    at boot. Writes do not flush back to disk unless `ext2_flush_all()` is called
    (done on shutdown via `diskman_shutdown()`).
-3. **TCP has no retransmit timer.** The handshake and data transfer work in the
-   QEMU user-mode network, which is lossless. A real network with packet loss
-   will stall.
+3. **TCP retransmit is single-segment.** A retransmit timer (RTO with binary
+   exponential backoff, up to 5 retries) is implemented, but the send buffer
+   holds only the most recent unacknowledged segment. Bulk transfer with
+   multiple in-flight segments is not yet supported.
 4. **USB has no device class drivers.** UHCI controller is detected; HID/mass
    storage require additional work.
 5. **Cross-compiler required.** The Makefile enforces `x86_64-elf-gcc`. If not

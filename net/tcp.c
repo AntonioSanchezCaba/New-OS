@@ -2,7 +2,14 @@
  * net/tcp.c - TCP and UDP transport layer
  *
  * Implements a minimal TCP state machine supporting active open (connect),
- * send, receive, and close. Also provides stateless UDP send.
+ * send, receive, and close.  Also provides stateless UDP send.
+ *
+ * Retransmit timer (RFC 793 §3.7):
+ *   Each socket maintains a retransmit buffer for the most recent
+ *   unacknowledged segment (SYN, data).  tcp_tick() is called from
+ *   the ARE render loop (~50 Hz) and retransmits the segment when the
+ *   current RTO expires.  RTO doubles on each retry (exponential backoff)
+ *   and gives up after TCP_MAX_RETRIES attempts, resetting the socket.
  */
 #include <net/tcp.h>
 #include <net/ip.h>
@@ -143,8 +150,39 @@ static int tcp_send_segment(tcp_socket_t* s, uint8_t flags,
     int ret = ip4_send(s->remote_ip, PROTO_TCP, buf->data, seg_len);
     net_free_buf(buf);
 
-    if (ret == 0 && data_len > 0)
-        s->tx_seq += (uint32_t)data_len;
+    if (ret == 0) {
+        /* Advance tx_seq by data payload length first */
+        if (data_len > 0)
+            s->tx_seq += (uint32_t)data_len;
+
+        /* Save segment for potential retransmission.
+         * Only segments that consume sequence space: SYN, FIN, data.
+         * Pure ACKs (no payload, no SYN/FIN) are not saved.
+         *
+         * tx_rtx_seq    = sequence number in the saved segment header
+         * tx_rtx_end_seq = first sequence number AFTER this segment
+         *                  (what the peer will ACK when it arrives)
+         * For SYN or FIN: they each consume 1 extra sequence number.
+         */
+        bool consumes_seq = (flags & (TCP_SYN | TCP_FIN)) || (data_len > 0);
+        if (consumes_seq) {
+            size_t save_len = (data_len < TCP_RTX_BUF) ? data_len : TCP_RTX_BUF;
+            uint32_t seg_seq = s->tx_seq - (uint32_t)data_len; /* seq sent */
+            uint32_t end_seq = s->tx_seq; /* after data */
+            if (flags & TCP_SYN) end_seq++; /* SYN consumes 1 seq num */
+            if (flags & TCP_FIN) end_seq++; /* FIN consumes 1 seq num */
+
+            s->tx_rtx_seq     = seg_seq;
+            s->tx_rtx_end_seq = end_seq;
+            s->tx_rtx_flags   = flags;
+            s->tx_rtx_len     = save_len;
+            if (data && save_len > 0)
+                memcpy(s->tx_rtx_buf, data, save_len);
+            if (s->tx_rtx_count == 0)
+                s->tx_rto = TCP_RTO_INITIAL; /* reset on fresh send */
+            s->tx_rtx_time    = (uint32_t)timer_get_ticks();
+        }
+    }
 
     return ret;
 }
@@ -180,10 +218,12 @@ int tcp_connect(ip4_addr_t ip, uint16_t port)
     }
     s->tx_seq++;  /* SYN consumes one sequence number */
 
-    /* Wait for SYN-ACK (poll with timeout) */
+    /* Wait for SYN-ACK (poll with timeout).
+     * tcp_tick() handles SYN retransmission if the SYN-ACK is delayed. */
     for (uint32_t start = timer_get_ticks();
          timer_get_ticks() - start < TIMER_FREQ * 5; ) {
         if (net_iface.poll) net_iface.poll();
+        tcp_tick();   /* retransmit SYN if RTO expires during connect */
         if (s->state == TCP_ESTABLISHED) return sock;
         scheduler_yield();  /* yield instead of busy-spinning */
     }
@@ -229,8 +269,98 @@ void tcp_close(int sock)
         s->tx_seq++;
         s->state = TCP_FIN_WAIT;
     }
+    s->tx_rtx_time  = 0;   /* cancel any pending retransmit */
+    s->tx_rtx_len   = 0;
     s->used  = false;
     s->state = TCP_CLOSED;
+}
+
+/* =========================================================
+ * Retransmit helper — re-sends the saved segment with the
+ * original sequence number without updating socket state.
+ * ========================================================= */
+
+static void tcp_rtx_send(tcp_socket_t* s)
+{
+    size_t seg_len = sizeof(tcp_hdr_t) + s->tx_rtx_len;
+    net_buf_t* buf = net_alloc_buf();
+    if (!buf) return;
+
+    tcp_hdr_t* hdr = (tcp_hdr_t*)buf->data;
+    hdr->src_port    = htons(s->local_port);
+    hdr->dst_port    = htons(s->remote_port);
+    hdr->seq         = htonl(s->tx_rtx_seq);
+    hdr->ack         = (s->tx_rtx_flags & TCP_ACK) ? htonl(s->rx_seq) : 0;
+    hdr->data_offset = (sizeof(tcp_hdr_t) / 4) << 4;
+    hdr->flags       = s->tx_rtx_flags;
+    hdr->window      = htons(4096);
+    hdr->checksum    = 0;
+    hdr->urgent      = 0;
+
+    if (s->tx_rtx_len > 0)
+        memcpy(buf->data + sizeof(tcp_hdr_t), s->tx_rtx_buf, s->tx_rtx_len);
+
+    hdr->checksum = tcp_checksum(net_iface.ip, s->remote_ip,
+                                 PROTO_TCP, buf->data, seg_len);
+    ip4_send(s->remote_ip, PROTO_TCP, buf->data, seg_len);
+    net_free_buf(buf);
+}
+
+/* =========================================================
+ * tcp_tick — retransmit timer, call periodically (~50 Hz).
+ *
+ * For every socket with a pending retransmit (tx_rtx_time != 0),
+ * if the current RTO has expired, retransmit the saved segment.
+ * RTO doubles on each retry (binary exponential backoff, RFC 793).
+ * After TCP_MAX_RETRIES failures the socket is forcibly reset.
+ * ========================================================= */
+
+void tcp_tick(void)
+{
+    uint32_t now = (uint32_t)timer_get_ticks();
+
+    for (int i = 0; i < TCP_MAX_SOCKETS; i++) {
+        tcp_socket_t* s = &sockets[i];
+        if (!s->used || s->tx_rtx_time == 0) continue;
+
+        /* Has the RTO expired? */
+        if (now - s->tx_rtx_time < s->tx_rto) continue;
+
+        /* Give up after too many retransmissions */
+        if (s->tx_rtx_count >= TCP_MAX_RETRIES) {
+            klog_warn("TCP: slot %d max retries reached — resetting", i);
+            s->tx_rtx_time  = 0;
+            s->tx_rtx_len   = 0;
+            s->tx_rtx_count = 0;
+            s->state = TCP_CLOSED;
+            s->used  = false;
+            continue;
+        }
+
+        /* Retransmit the saved segment */
+        s->tx_rtx_count++;
+        s->tx_rto = (s->tx_rto * 2 < TCP_RTO_MAX) ? s->tx_rto * 2 : TCP_RTO_MAX;
+        s->tx_rtx_time = now;
+
+        kdebug("TCP: retransmit slot=%d attempt=%d rto=%u seq=%u",
+               i, s->tx_rtx_count, s->tx_rto, s->tx_rtx_seq);
+        tcp_rtx_send(s);
+    }
+}
+
+/* =========================================================
+ * Retransmit-clear helper
+ * Clear the retransmit buffer when an ACK covers our sent data.
+ * ========================================================= */
+
+static void tcp_rtx_clear_if_acked(tcp_socket_t* s, uint32_t ack_num)
+{
+    if (s->tx_rtx_time == 0) return;            /* nothing pending        */
+    if (ack_num < s->tx_rtx_end_seq) return;    /* not fully covered yet  */
+    /* All pending data acknowledged — clear retransmit state */
+    s->tx_rtx_time  = 0;
+    s->tx_rtx_len   = 0;
+    s->tx_rtx_count = 0;
 }
 
 /* =========================================================
@@ -320,11 +450,13 @@ void tcp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len)
      * ------------------------------------------------------- */
     case TCP_SYN_RCVD:
         if (flags & TCP_RST) {
+            s->tx_rtx_time = 0;
             s->used  = false;
             s->state = TCP_CLOSED;
             break;
         }
         if ((flags & TCP_ACK) && ack == s->tx_seq) {
+            tcp_rtx_clear_if_acked(s, ack);   /* clear SYN-ACK retransmit */
             s->state = TCP_ESTABLISHED;
             kdebug("TCP: connection ESTABLISHED on port %u (slot %d)",
                    s->local_port, (int)(s - sockets));
@@ -338,6 +470,7 @@ void tcp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len)
     case TCP_SYN_SENT:
         if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
             if (ack == s->tx_seq) {
+                tcp_rtx_clear_if_acked(s, ack);   /* clear SYN retransmit */
                 s->rx_seq = seq + 1;
                 s->state  = TCP_ESTABLISHED;
                 /* Send ACK */
@@ -362,6 +495,10 @@ void tcp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len)
             s->state = TCP_TIME_WAIT;
             break;
         }
+        /* ACK advances our send window — clear retransmit if fully covered */
+        if ((flags & TCP_ACK) && s->tx_rtx_time != 0)
+            tcp_rtx_clear_if_acked(s, ack);
+
         /* Data segment */
         if (data_len > 0 && seq == s->rx_seq) {
             /* Copy into RX ring buffer */

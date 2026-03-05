@@ -42,6 +42,12 @@ typedef enum {
 
 #define TCP_MAX_SOCKETS 16
 
+/* Retransmit constants */
+#define TCP_RTO_INITIAL   300   /* Initial RTO: 3 s at 100 Hz              */
+#define TCP_RTO_MAX      6000   /* Max RTO: 60 s (exponential backoff cap)  */
+#define TCP_MAX_RETRIES     5   /* Give up after 5 retransmissions          */
+#define TCP_RTX_BUF      2048  /* Max bytes saved for retransmission       */
+
 /* TCP socket */
 typedef struct {
     bool        used;
@@ -56,6 +62,16 @@ typedef struct {
     /* Receive buffer */
     uint8_t  rx_buf[4096];
     size_t   rx_head, rx_tail;
+
+    /* Retransmit state -------------------------------------------------- */
+    uint8_t  tx_rtx_buf[TCP_RTX_BUF];  /* Copy of unACKed payload          */
+    size_t   tx_rtx_len;                /* Payload bytes saved (0 = none)   */
+    uint8_t  tx_rtx_flags;              /* TCP flags of the saved segment   */
+    uint32_t tx_rtx_seq;                /* tx_seq when segment was sent     */
+    uint32_t tx_rtx_end_seq;            /* First seq# after this segment    */
+    uint32_t tx_rtx_time;               /* timer_get_ticks() when sent      */
+    uint32_t tx_rto;                    /* Current RTO in ticks             */
+    int      tx_rtx_count;              /* Number of retransmissions so far */
 } tcp_socket_t;
 
 /* TCP API */
@@ -76,5 +92,9 @@ int  tcp_send(int sock, const void* data, size_t len);
 int  tcp_recv(int sock, void* buf, size_t len);
 void tcp_close(int sock);
 void tcp_receive(const ip4_hdr_t* ip_hdr, const void* segment, size_t len);
+
+/* Called periodically (e.g. from the ARE render loop) to retransmit
+ * unacknowledged segments whose RTO has expired. */
+void tcp_tick(void);
 
 #endif /* NET_TCP_H */
