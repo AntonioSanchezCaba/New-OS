@@ -14,6 +14,43 @@
 framebuffer_t fb = { 0 };
 
 /*
+ * Raw framebuffer info — set by fb_raw_setup() after vmm_init() maps 0-4 GB.
+ * Used by fb_paint_panic() so panics are visible in graphical mode even
+ * before the full framebuffer driver (back buffer, etc.) is initialised.
+ */
+static volatile uint32_t* raw_vram   = NULL;
+static uint32_t           raw_width  = 0;
+static uint32_t           raw_height = 0;
+static uint32_t           raw_stride = 0; /* pixels per row */
+
+/*
+ * fb_raw_setup - store physical framebuffer pointer for panic use.
+ * Called from kernel.c immediately after vmm_init() maps 0-4 GB as identity
+ * so the physical address can be used as a virtual pointer safely.
+ */
+void fb_raw_setup(uintptr_t phys, uint32_t w, uint32_t h, uint32_t pitch)
+{
+    raw_vram   = (volatile uint32_t*)phys;
+    raw_width  = w;
+    raw_height = h;
+    raw_stride = pitch / 4;
+}
+
+/*
+ * fb_paint_panic - fill the physical framebuffer with a solid colour.
+ * Safe to call from kernel_panic() at any point after fb_raw_setup().
+ * Does not use the back buffer or any heap allocation.
+ */
+void fb_paint_panic(uint32_t colour)
+{
+    if (!raw_vram || !raw_width || !raw_height) return;
+    for (uint32_t y = 0; y < raw_height; y++)
+        for (uint32_t x = 0; x < raw_width; x++)
+            raw_vram[y * raw_stride + x] = colour;
+    __asm__ volatile("mfence" ::: "memory");
+}
+
+/*
  * fb_init - parse the Multiboot2 framebuffer tag and set up the driver.
  */
 void fb_init(struct multiboot2_tag_framebuffer* fb_tag)

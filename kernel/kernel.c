@@ -144,11 +144,37 @@ void kernel_main(struct multiboot2_info* mb2_info)
     vmm_init();                                  /* [STABLE] */
     kinfo("[BOOT] VMM OK");
 
+    /* Inform the panic handler of the physical framebuffer address so any
+     * kernel panic after this point paints a visible RED screen instead of
+     * silently writing to the VGA text buffer (invisible in VBE mode).   */
+    {
+        struct multiboot2_tag_framebuffer* _early_fb =
+            (struct multiboot2_tag_framebuffer*)
+            multiboot2_find_tag(mb2_info, MULTIBOOT2_TAG_FRAMEBUFFER);
+        if (_early_fb && _early_fb->framebuffer_type == 1 &&
+            _early_fb->framebuffer_bpp == 32) {
+            fb_raw_setup((uintptr_t)_early_fb->framebuffer_addr,
+                         _early_fb->framebuffer_width,
+                         _early_fb->framebuffer_height,
+                         _early_fb->framebuffer_pitch);
+            kinfo("[BOOT] Raw fb registered: %ux%u @ phys 0x%llx",
+                  _early_fb->framebuffer_width, _early_fb->framebuffer_height,
+                  (unsigned long long)_early_fb->framebuffer_addr);
+        } else {
+            klog_warn("[BOOT] No 32bpp linear framebuffer in MB2 tag — panic will be text-only");
+            if (_early_fb)
+                klog_warn("[BOOT] MB2 fb tag type=%u bpp=%u",
+                          _early_fb->framebuffer_type, _early_fb->framebuffer_bpp);
+            else
+                klog_warn("[BOOT] MB2 fb tag not found at all");
+        }
+    }
+
     /* Early framebuffer stripe test (identity-map access, pre-heap).
-     * Writes three 4-pixel-tall colour bands directly to VRAM through
-     * the 0–4 GB identity map established by vmm_init().  If v86 shows
-     * a red/green/blue stripe at the top of the screen the VRAM path
-     * is confirmed working before fb_init() or the heap are set up.   */
+     * Paints the entire screen WHITE directly through the 0-4 GB identity
+     * map that vmm_init() just installed.  In copy.sh / v86 this is the
+     * first proof that framebuffer VRAM writes are actually reaching the
+     * canvas — if you see a white flash the VRAM path works.           */
     {
         struct multiboot2_tag_framebuffer* _fbt =
             (struct multiboot2_tag_framebuffer*)
@@ -157,17 +183,21 @@ void kernel_main(struct multiboot2_info* mb2_info)
             _fbt->framebuffer_bpp == 32) {
             volatile uint32_t* _vram =
                 (volatile uint32_t*)(uintptr_t)_fbt->framebuffer_addr;
-            uint32_t _w  = _fbt->framebuffer_width;
-            uint32_t _p  = _fbt->framebuffer_pitch / 4; /* stride in px */
-            uint32_t _colours[3] = {
-                0xFFFF0000u, /* red   */
-                0xFF00FF00u, /* green */
-                0xFF0000FFu  /* blue  */
-            };
-            for (int _row = 0; _row < 3; _row++)
+            uint32_t _w = _fbt->framebuffer_width;
+            uint32_t _h = _fbt->framebuffer_height;
+            uint32_t _p = _fbt->framebuffer_pitch / 4; /* stride in px */
+            /* Fill full screen white so it is unmissable in v86 */
+            for (uint32_t _y = 0; _y < _h; _y++)
                 for (uint32_t _x = 0; _x < _w; _x++)
-                    _vram[(uint32_t)_row * _p + _x] = _colours[_row];
-            kinfo("[BOOT] Identity-map VRAM stripe test written");
+                    _vram[_y * _p + _x] = 0xFFFFFFFFu;
+            __asm__ volatile("mfence" ::: "memory");
+            kinfo("[BOOT] Early VRAM test: full white screen written (should flash in v86)");
+        } else {
+            if (_fbt)
+                klog_warn("[BOOT] MB2 fb tag present but type=%u bpp=%u (not 32bpp linear)",
+                          _fbt->framebuffer_type, _fbt->framebuffer_bpp);
+            else
+                klog_warn("[BOOT] MB2 fb tag missing — no VRAM test possible");
         }
     }
 

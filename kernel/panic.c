@@ -9,6 +9,7 @@
 #include <types.h>
 #include <drivers/vga.h>
 #include <drivers/serial.h>
+#include <drivers/framebuffer.h>
 #include <stdarg.h>
 
 /* Provides vsnprintf for formatting the panic message */
@@ -32,6 +33,11 @@ void NORETURN kernel_panic(const char* file, int line, const char* fmt, ...)
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
+
+    /* Paint the physical framebuffer solid RED so the panic is immediately
+     * visible in VBE graphical mode (VGA text writes at 0xB8000 are
+     * invisible when the display is in graphical/VBE mode).             */
+    fb_paint_panic(0xFFCC0000u);   /* bright red */
 
     /* Print to VGA with red background */
     vga_set_color(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_RED));

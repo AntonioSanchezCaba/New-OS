@@ -79,6 +79,8 @@ static inline uint32_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 #define COLOR_ACCENT      rgb(0x00, 0x7A, 0xCC)
 
 /* Framebuffer API */
+void    fb_raw_setup(uintptr_t phys, uint32_t w, uint32_t h, uint32_t pitch);
+void    fb_paint_panic(uint32_t colour);
 void    fb_init(struct multiboot2_tag_framebuffer* fb_tag);
 void    fb_flip(void);                /* Full back buffer -> physical fb */
 void    fb_flip_damage(void);         /* Flip only dirty damage regions */
