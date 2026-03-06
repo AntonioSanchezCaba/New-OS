@@ -229,60 +229,64 @@ check_long_mode:
 
 ;;; =========================================================
 ;;; setup_page_tables
-;;; Sets up a minimal 4-level paging structure using 2MB pages.
+;;; Sets up 4-level paging with standard 4KB pages (no huge pages).
+;;; Maps 0-6MB identity and at 0xFFFFFFFF80000000 (higher half).
+;;; 6MB covers all kernel sections including BSS (~4.8MB max LMA).
 ;;;
-;;; Memory layout of page tables (placed just below 0x100000):
-;;;   0x1000: PML4
-;;;   0x2000: PDPT for identity map (entries 0 and 510)
-;;;   0x3000: PD  for first 2GB using 2MB huge pages
-;;;   0x4000: PDPT for higher-half (PML4[511])
-;;;   0x5000: PD  for higher-half -> same 2GB
+;;; Structure:
+;;;   PML4[0]   -> PDPT_LOW[0]   -> PD[0..2] -> PT0, PT1, PT2
+;;;   PML4[511] -> PDPT_HIGH[510]-> PD[0..2] -> PT0, PT1, PT2
+;;;   PT[n] = (n * 4096) | 3  (identity-mapped 4KB pages, 0..6MB)
 ;;; =========================================================
 setup_page_tables:
     ;; All boot_* symbols are in .boot.bss: VMA = LMA = physical address.
-    ;; Do NOT subtract KERNEL_VMA_OFFSET — use them directly.
 
-    ;; Clear all 5 page tables (5 * 4096 = 20480 bytes)
+    ;; Clear 7 pages: PML4, PDPT_LOW, PDPT_HIGH, PD, PT0, PT1, PT2
     mov edi, boot_pml4
     xor eax, eax
-    mov ecx, (5 * 4096) / 4
+    mov ecx, (7 * 4096) / 4
     rep stosd
 
     ;; ---- PML4 ----
-    ;; PML4[0] -> PDPT (identity map, covers 0x0 - 0x7FFFFFFF)
     mov eax, boot_pdpt_low
-    or  eax, 3                              ; Present + RW
-    mov [boot_pml4], eax
+    or  eax, 3                          ; Present + RW
+    mov [boot_pml4], eax                ; PML4[0] -> PDPT_LOW
 
-    ;; PML4[511] -> PDPT (higher half: 0xFFFFFFFF80000000+)
     mov eax, boot_pdpt_high
     or  eax, 3
-    mov [boot_pml4 + 511*8], eax
+    mov [boot_pml4 + 511*8], eax        ; PML4[511] -> PDPT_HIGH
 
-    ;; ---- Lower PDPT ----
-    ;; PDPT[0] -> PD (first 1GB)
+    ;; ---- PDPTs (both point to the same PD) ----
     mov eax, boot_pd
     or  eax, 3
-    mov [boot_pdpt_low], eax
+    mov [boot_pdpt_low], eax            ; PDPT_LOW[0] -> PD
 
-    ;; ---- Higher PDPT ----
-    ;; PDPT[510] -> PD (maps 0xFFFFFFFF80000000 to physical 0x0)
-    ;; Note: 0xFFFFFFFF80000000 is in PML4[511], PDPT[510]
-    ;;   Virtual: 0xFFFF_FFFF_8000_0000
-    ;;     PML4 index = (0xFFFF_FFFF_8000_0000 >> 39) & 0x1FF = 511
-    ;;     PDPT index = (0xFFFF_FFFF_8000_0000 >> 30) & 0x1FF = 510
-    mov [boot_pdpt_high + 510*8], eax
+    ;; PDPT_HIGH[510] -> same PD (VA 0xFFFFFFFF80000000 -> PML4[511], PDPT[510])
+    mov [boot_pdpt_high + 510*8], eax   ; PDPT_HIGH[510] -> PD
 
-    ;; ---- Page Directory (shared by both PDPTs) ----
-    ;; Map 512 * 2MB = 1GB using huge pages
-    mov eax, 0x83       ; Present + RW + Huge (2MB)
-    mov ecx, 0
-.fill_pd:
-    mov [boot_pd + ecx*8], eax
-    add eax, 0x200000   ; Next 2MB
-    inc ecx
-    cmp ecx, 512
-    jl  .fill_pd
+    ;; ---- PD entries (4KB page tables, no PS/huge bit) ----
+    mov eax, boot_pt0
+    or  eax, 3
+    mov [boot_pd], eax                  ; PD[0] -> PT0 (covers 0..2MB)
+
+    mov eax, boot_pt1
+    or  eax, 3
+    mov [boot_pd + 8], eax              ; PD[1] -> PT1 (covers 2MB..4MB)
+
+    mov eax, boot_pt2
+    or  eax, 3
+    mov [boot_pd + 16], eax             ; PD[2] -> PT2 (covers 4MB..6MB)
+
+    ;; ---- Fill PT0 + PT1 + PT2 with identity-mapped 4KB entries ----
+    ;; PT[n] = (n * 4096) | 3, for n = 0 .. 3*512-1
+    mov edi, boot_pt0
+    mov eax, 0x003          ; PA=0, Present+RW
+    mov ecx, 3 * 512        ; 1536 entries across 3 PTs
+.fill_pts:
+    mov  [edi], eax         ; Write lower 32 bits (upper 32 = 0 from clear)
+    add  edi, 8             ; Advance to next 8-byte entry slot
+    add  eax, 0x1000        ; Next 4KB physical page
+    loop .fill_pts
 
     ret
 
@@ -370,7 +374,13 @@ boot_pdpt_high:
 boot_pd:
     resb 4096
 
-boot_pd2:
+boot_pt0:
+    resb 4096
+
+boot_pt1:
+    resb 4096
+
+boot_pt2:
     resb 4096
 
 ;;; Boot stack (16KB)
