@@ -117,7 +117,7 @@ _start:
     mov ecx, 0xC0000080  ; EFER MSR number
     rdmsr
     or  eax, (1 << 8)   ; EFER.LME = 1
-    or  eax, (1 << 11)  ; EFER.NXE = 1 (enable No-Execute bit)
+    ;; NXE (bit 11) intentionally NOT set — v86 may not support it
     wrmsr
 
     ;; Debug: 'E' — long mode configured
@@ -131,11 +131,26 @@ _start:
     or  eax, (1 << 0)   ; CR0.PE = 1 (should already be set by GRUB)
     mov cr0, eax
 
+    ;; Debug: 'e' — paging+long mode now active (compatibility mode)
+    mov dx, 0x3F8
+    mov al, 'e'
+    out dx, al
+
     ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
     lgdt [gdt64_ptr]
 
-    ;; Far jump to flush the pipeline and enter 64-bit code segment
-    jmp 0x08:(long_mode_entry - KERNEL_VMA_OFFSET)
+    ;; Debug: 'f' — GDT loaded, about to far-jump to 64-bit CS
+    mov dx, 0x3F8
+    mov al, 'f'
+    out dx, al
+
+    ;; Transition to 64-bit code segment via far return (retf).
+    ;; This is equivalent to jmp 0x08:(long_mode_entry - KERNEL_VMA_OFFSET)
+    ;; but avoids the 0xEA opcode which some emulators mishandle in
+    ;; compatibility mode. retf pops EIP then CS from the stack.
+    push dword 0x08
+    push dword (long_mode_entry - KERNEL_VMA_OFFSET)
+    retf
 
 .no_multiboot:
     mov esi, msg_no_multiboot   ; .boot.data: physical = VMA, no offset needed
