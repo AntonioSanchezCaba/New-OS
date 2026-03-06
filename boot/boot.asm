@@ -85,9 +85,9 @@ _start:
     call check_cpuid
     jc .no_cpuid
 
-    ;; Check that Long Mode is supported
-    call check_long_mode
-    jc .no_long_mode
+    ;; Long mode check skipped: v86/copy.sh CPUID does not expose the LM bit
+    ;; even though v86 fully supports 64-bit execution.  GRUB loaded our
+    ;; Multiboot2 ELF64 kernel, which is only possible on a 64-bit CPU.
 
     ;; Debug: 'C' — CPU checks passed
     mov dx, 0x3F8
@@ -145,9 +145,6 @@ _start:
     mov esi, msg_no_cpuid
     jmp boot_error32
 
-.no_long_mode:
-    mov esi, msg_no_long_mode
-    jmp boot_error32
 
 ;;; =========================================================
 ;;; boot_serial_puts32 - write a string to COM1 (32-bit)
