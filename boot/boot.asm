@@ -229,50 +229,68 @@ check_long_mode:
 
 ;;; =========================================================
 ;;; setup_page_tables
-;;; Sets up 4-level paging with 2MB huge pages.
+;;; Sets up 4-level paging with standard 4KB pages (no huge pages).
 ;;; Maps 0-6MB identity and at 0xFFFFFFFF80000000 (higher half).
 ;;; 6MB covers all kernel sections including BSS (~4.8MB max LMA).
 ;;;
 ;;; Structure:
-;;;   PML4[0]   -> PDPT_LOW[0]   -> PD[0..2] (2MB huge pages, 0..6MB)
-;;;   PML4[511] -> PDPT_HIGH[510]-> PD[0..2] (same PD, 0..6MB)
-;;;   PD[n] = (n * 2MB) | PS | RW | P | Accessed
+;;;   PML4[0]   -> PDPT_LOW[0]   -> PD[0..2] -> PT0, PT1, PT2
+;;;   PML4[511] -> PDPT_HIGH[510]-> PD[0..2] -> PT0, PT1, PT2
+;;;   PT[n] = (n * 4096) | 3  (identity-mapped 4KB pages, 0..6MB)
 ;;;
-;;; All non-leaf entries have the Accessed bit (bit 5) pre-set.
-;;; This avoids emulator quirks where a missing Accessed bit in a
-;;; freshly-loaded page table causes a fault on CR0.PG activation.
+;;; 4KB pages are used because v86/copy.sh does not support 2MB
+;;; huge-page (PS-bit) PDEs in IA-32e mode — enabling paging with
+;;; huge pages causes an immediate triple fault.
 ;;; =========================================================
 setup_page_tables:
     ;; All boot_* symbols are in .boot.bss: VMA = LMA = physical address.
 
-    ;; Clear 4 pages: PML4, PDPT_LOW, PDPT_HIGH, PD
+    ;; Clear 7 pages: PML4, PDPT_LOW, PDPT_HIGH, PD, PT0, PT1, PT2
     mov edi, boot_pml4
     xor eax, eax
-    mov ecx, (4 * 4096) / 4
+    mov ecx, (7 * 4096) / 4
     rep stosd
 
     ;; ---- PML4 ----
     mov eax, boot_pdpt_low
-    or  eax, 0x23               ; Present + RW + Accessed
-    mov [boot_pml4], eax        ; PML4[0] -> PDPT_LOW
+    or  eax, 3                          ; Present + RW
+    mov [boot_pml4], eax                ; PML4[0] -> PDPT_LOW
 
     mov eax, boot_pdpt_high
-    or  eax, 0x23               ; Present + RW + Accessed
-    mov [boot_pml4 + 511*8], eax ; PML4[511] -> PDPT_HIGH
+    or  eax, 3
+    mov [boot_pml4 + 511*8], eax        ; PML4[511] -> PDPT_HIGH
 
     ;; ---- PDPTs (both point to the same PD) ----
     mov eax, boot_pd
-    or  eax, 0x23               ; Present + RW + Accessed
-    mov [boot_pdpt_low], eax    ; PDPT_LOW[0] -> PD
+    or  eax, 3
+    mov [boot_pdpt_low], eax            ; PDPT_LOW[0] -> PD
 
     ;; PDPT_HIGH[510] -> same PD (VA 0xFFFFFFFF80000000 -> PML4[511], PDPT[510])
-    mov [boot_pdpt_high + 510*8], eax  ; PDPT_HIGH[510] -> PD
+    mov [boot_pdpt_high + 510*8], eax   ; PDPT_HIGH[510] -> PD
 
-    ;; ---- PD entries: 2MB huge pages ----
-    ;; Flags: PS(7) + Accessed(5) + RW(1) + P(0) = 0xA3
-    mov dword [boot_pd],      0x0000A3  ; 0..2MB
-    mov dword [boot_pd + 8],  0x2000A3  ; 2MB..4MB
-    mov dword [boot_pd + 16], 0x4000A3  ; 4MB..6MB
+    ;; ---- PD entries (4KB page tables, no PS/huge bit) ----
+    mov eax, boot_pt0
+    or  eax, 3
+    mov [boot_pd], eax                  ; PD[0] -> PT0 (covers 0..2MB)
+
+    mov eax, boot_pt1
+    or  eax, 3
+    mov [boot_pd + 8], eax              ; PD[1] -> PT1 (covers 2MB..4MB)
+
+    mov eax, boot_pt2
+    or  eax, 3
+    mov [boot_pd + 16], eax             ; PD[2] -> PT2 (covers 4MB..6MB)
+
+    ;; ---- Fill PT0 + PT1 + PT2 with identity-mapped 4KB entries ----
+    ;; PT[n] = (n * 4096) | 3, for n = 0 .. 3*512-1
+    mov edi, boot_pt0
+    mov eax, 0x003          ; PA=0, Present+RW
+    mov ecx, 3 * 512        ; 1536 entries across 3 PTs
+.fill_pts:
+    mov  [edi], eax         ; Write lower 32 bits (upper 32 = 0 from clear)
+    add  edi, 8             ; Advance to next 8-byte entry slot
+    add  eax, 0x1000        ; Next 4KB physical page
+    loop .fill_pts
 
     ret
 
@@ -358,6 +376,15 @@ boot_pdpt_high:
     resb 4096
 
 boot_pd:
+    resb 4096
+
+boot_pt0:
+    resb 4096
+
+boot_pt1:
+    resb 4096
+
+boot_pt2:
     resb 4096
 
 ;;; Boot stack (16KB)
