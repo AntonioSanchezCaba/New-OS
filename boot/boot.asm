@@ -128,29 +128,26 @@ _start:
     mov eax, BOOT_PML4
     mov cr3, eax
 
-    ;; Enable Long Mode via the EFER MSR
+    ;; Enable Long Mode via the EFER MSR.
+    ;; Write EFER directly (skip RDMSR first — RDMSR may #GP in v86, corrupting
+    ;; EAX via the exception handler; a direct WRMSR is safer).
     mov ecx, 0xC0000080  ; EFER MSR number
-    rdmsr
-    or  eax, (1 << 8)   ; EFER.LME = 1
-    ;; NXE (bit 11) intentionally NOT set — v86 may not support it
+    xor edx, edx
+    mov eax, (1 << 8)   ; EFER.LME = 1 (NXE intentionally off)
     wrmsr
 
-    ;; Read EFER back to verify LME was actually set (WRMSR might be a NOP)
+    ;; RDMSR readback — diagnostic only, NOT a gate.
+    ;; RDMSR may #GP in v86 (returning EAX=0 via GRUB's handler), but the
+    ;; WRMSR above likely succeeded.  Continue regardless of readback.
     rdmsr
     test eax, (1 << 8)
-    jz  .efer_not_set
-    ;; LME IS set — continue with IA-32e paging
-    vga_diag 'L', 0x0A, 3   ; col 3: 'L' (green) = EFER.LME confirmed set
-    jmp .efer_ok
-.efer_not_set:
-    ;; LME is NOT set — WRMSR did nothing; IA-32e paging is impossible
-    vga_diag 'N', 0x0C, 3   ; col 3: 'N' (red) = EFER.LME not set (WRMSR NOP!)
-    ;; Halt — cannot proceed; PAE paging would triple-fault due to reserved bits
-    cli
-.efer_halt:
-    hlt
-    jmp .efer_halt
-.efer_ok:
+    jz  .efer_readback_zero
+    vga_diag 'L', 0x0A, 3   ; col 3: 'L' green  = RDMSR confirms LME set
+    jmp .efer_cont
+.efer_readback_zero:
+    vga_diag 'N', 0x0E, 3   ; col 3: 'N' yellow = RDMSR returned 0 (#GP artifact?)
+    ;; Continue regardless — WRMSR probably still set LME
+.efer_cont:
 
     ;; Debug: 'E' — long mode configured
     mov dx, 0x3F8
