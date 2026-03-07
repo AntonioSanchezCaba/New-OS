@@ -135,6 +135,23 @@ _start:
     ;; NXE (bit 11) intentionally NOT set — v86 may not support it
     wrmsr
 
+    ;; Read EFER back to verify LME was actually set (WRMSR might be a NOP)
+    rdmsr
+    test eax, (1 << 8)
+    jz  .efer_not_set
+    ;; LME IS set — continue with IA-32e paging
+    vga_diag 'L', 0x0A, 3   ; col 3: 'L' (green) = EFER.LME confirmed set
+    jmp .efer_ok
+.efer_not_set:
+    ;; LME is NOT set — WRMSR did nothing; IA-32e paging is impossible
+    vga_diag 'N', 0x0C, 3   ; col 3: 'N' (red) = EFER.LME not set (WRMSR NOP!)
+    ;; Halt — cannot proceed; PAE paging would triple-fault due to reserved bits
+    cli
+.efer_halt:
+    hlt
+    jmp .efer_halt
+.efer_ok:
+
     ;; Debug: 'E' — long mode configured
     mov dx, 0x3F8
     mov al, 'E'
@@ -143,16 +160,16 @@ _start:
     vga_diag '3', 0x0E, 2
 
     ;; Verify PML4[0] has the expected value before enabling paging.
-    ;; Expected: BOOT_PDPT_LOW | 3 = 0x2003
+    ;; Flags = 0x07 (P=1, RW=1, U/S=1)
     mov eax, [BOOT_PML4]
-    cmp eax, (BOOT_PDPT_LOW | 3)
+    cmp eax, (BOOT_PDPT_LOW | 7)
     je  .pml4_ok
-    ;; PML4[0] is WRONG — write 'W' (red) to col 3
-    vga_diag 'W', 0x0C, 3
+    ;; PML4[0] is WRONG — write 'W' (red) to col 4
+    vga_diag 'W', 0x0C, 4
     jmp .pml4_done
 .pml4_ok:
-    ;; PML4[0] is correct — write 'V' (green) to col 3
-    vga_diag 'V', 0x0A, 3
+    ;; PML4[0] is correct — write 'V' (green) to col 4
+    vga_diag 'V', 0x0A, 4
 .pml4_done:
 
     ;; Enable paging (which also activates long mode)
@@ -165,8 +182,8 @@ _start:
     mov dx, 0x3F8
     mov al, 'e'
     out dx, al
-    ;; VGA diag col 4: '4' = CR0.PG set, paging active!
-    vga_diag '4', 0x0A, 4
+    ;; VGA diag col 5: '4' = CR0.PG set, paging active!
+    vga_diag '4', 0x0A, 5
 
     ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
     lgdt [gdt64_ptr]
@@ -280,17 +297,19 @@ setup_page_tables:
     rep stosd
 
     ;; ---- PML4 ----
+    ;; Flags: P=1, RW=1, U/S=1 (0x07) — U/S=1 ensures no supervisor-only
+    ;; checks interfere with v86's paging implementation.
     mov eax, BOOT_PDPT_LOW
-    or  eax, 3                          ; Present + RW
+    or  eax, 7                          ; Present + RW + U/S
     mov [BOOT_PML4], eax                ; PML4[0] -> PDPT_LOW
 
     mov eax, BOOT_PDPT_HIGH
-    or  eax, 3
+    or  eax, 7
     mov [BOOT_PML4 + 511*8], eax        ; PML4[511] -> PDPT_HIGH
 
     ;; ---- PDPTs (both point to the same PD) ----
     mov eax, BOOT_PD
-    or  eax, 3
+    or  eax, 7
     mov [BOOT_PDPT_LOW], eax            ; PDPT_LOW[0] -> PD
 
     ;; PDPT_HIGH[510] -> same PD (VA 0xFFFFFFFF80000000 -> PML4[511], PDPT[510])
@@ -298,21 +317,21 @@ setup_page_tables:
 
     ;; ---- PD entries (4KB page tables, no PS/huge bit) ----
     mov eax, BOOT_PT0
-    or  eax, 3
+    or  eax, 7
     mov [BOOT_PD], eax                  ; PD[0] -> PT0 (covers 0..2MB)
 
     mov eax, BOOT_PT1
-    or  eax, 3
+    or  eax, 7
     mov [BOOT_PD + 8], eax              ; PD[1] -> PT1 (covers 2MB..4MB)
 
     mov eax, BOOT_PT2
-    or  eax, 3
+    or  eax, 7
     mov [BOOT_PD + 16], eax             ; PD[2] -> PT2 (covers 4MB..6MB)
 
     ;; ---- Fill PT0 + PT1 + PT2 with identity-mapped 4KB entries ----
-    ;; PT[n] = (n * 4096) | 3, for n = 0 .. 3*512-1
+    ;; PT[n] = (n * 4096) | 7, for n = 0 .. 3*512-1 (P+RW+U/S)
     mov edi, BOOT_PT0
-    mov eax, 0x003          ; PA=0, Present+RW
+    mov eax, 0x007          ; PA=0, Present+RW+U/S
     mov ecx, 3 * 512        ; 1536 entries across 3 PTs
 .fill_pts:
     mov  [edi], eax         ; Write lower 32 bits (upper 32 = 0 from clear)
@@ -435,8 +454,8 @@ section .text
 extern kernel_main
 
 long_mode_entry:
-    ;; VGA diag col 5: '5' = 64-bit long mode reached
-    mov word [0xB8000 + (24 * 80 + 5) * 2], (0x0D << 8) | '5'
+    ;; VGA diag col 6: '5' = 64-bit long mode reached
+    mov word [0xB8000 + (24 * 80 + 6) * 2], (0x0D << 8) | '5'
     ;; Debug: 'F' — 64-bit long mode reached!
     mov dx, 0x3F8
     mov al, 'F'
