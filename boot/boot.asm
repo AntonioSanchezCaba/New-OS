@@ -120,69 +120,81 @@ _start:
     vga_diag '2', 0x0B, 1
 
     ;; Enable PAE (Physical Address Extension) - required for long mode
+    ;; (no-op if we're already in IA-32e; harmless to set again)
     mov eax, cr4
     or  eax, (1 << 5)   ; CR4.PAE
     mov cr4, eax
 
-    ;; Load PML4 into CR3 (hardcoded low physical address)
+    ;; Load PML4 into CR3 (hardcoded low physical address).
+    ;; If already in IA-32e compat mode this switches from GRUB's page tables
+    ;; to ours; our tables identity-map 0-6MB so the next fetch works fine.
     mov eax, BOOT_PML4
     mov cr3, eax
 
-    ;; Enable Long Mode via the EFER MSR.
-    ;; Write EFER directly (skip RDMSR first — RDMSR may #GP in v86, corrupting
-    ;; EAX via the exception handler; a direct WRMSR is safer).
-    mov ecx, 0xC0000080  ; EFER MSR number
+    ;; === Check if we are already in IA-32e paging mode ===
+    ;; If GRUB entered us in 32-bit compatibility mode (LMA=1, CR0.PG=1) we
+    ;; must NOT touch EFER or repeat the CR0.PG write — WRMSR(EFER) with PG=1
+    ;; causes #GP on real hardware and v86 appears to silently clear EFER on
+    ;; return from that #GP, breaking everything.  Instead, just proceed to the
+    ;; GDT load and far return.
+    mov eax, cr0
+    test eax, (1 << 31)     ; CR0.PG already set?
+    jnz .paging_already_on  ; yes → already in IA-32e, skip EFER + CR0.PG
+
+    ;; ---------------------------------------------------------------
+    ;; 32-bit protected mode path: need to activate long mode ourselves
+    ;; ---------------------------------------------------------------
+    vga_diag 'P', 0x0B, 2  ; col 2: 'P' = entered as 32-bit PM (PG was 0)
+
+    ;; Set EFER.LME (direct write, no RDMSR first to avoid #GP artifacts)
+    mov ecx, 0xC0000080
     xor edx, edx
-    mov eax, (1 << 8)   ; EFER.LME = 1 (NXE intentionally off)
+    mov eax, (1 << 8)       ; EFER.LME = 1
     wrmsr
 
-    ;; RDMSR readback — diagnostic only, NOT a gate.
-    ;; RDMSR may #GP in v86 (returning EAX=0 via GRUB's handler), but the
-    ;; WRMSR above likely succeeded.  Continue regardless of readback.
+    ;; Diagnostic-only readback (may return 0 due to v86 #GP; not a gate)
     rdmsr
     test eax, (1 << 8)
     jz  .efer_readback_zero
-    vga_diag 'L', 0x0A, 3   ; col 3: 'L' green  = RDMSR confirms LME set
+    vga_diag 'L', 0x0A, 3   ; col 3: 'L' = RDMSR confirmed LME set
     jmp .efer_cont
 .efer_readback_zero:
-    vga_diag 'N', 0x0E, 3   ; col 3: 'N' yellow = RDMSR returned 0 (#GP artifact?)
-    ;; Continue regardless — WRMSR probably still set LME
+    vga_diag 'N', 0x0E, 3   ; col 3: 'N' = RDMSR returned 0 (possible #GP)
 .efer_cont:
 
-    ;; Debug: 'E' — long mode configured
-    mov dx, 0x3F8
-    mov al, 'E'
-    out dx, al
-    ;; VGA diag col 2: '3' = EFER.LME set, about to enable paging
-    vga_diag '3', 0x0E, 2
-
-    ;; Verify PML4[0] has the expected value before enabling paging.
-    ;; Flags = 0x07 (P=1, RW=1, U/S=1)
+    ;; Verify PML4[0] value (flags=0x07)
     mov eax, [BOOT_PML4]
     cmp eax, (BOOT_PDPT_LOW | 7)
     je  .pml4_ok
-    ;; PML4[0] is WRONG — write 'W' (red) to col 4
-    vga_diag 'W', 0x0C, 4
-    jmp .pml4_done
+    vga_diag 'W', 0x0C, 4   ; col 4: 'W' = PML4[0] wrong
+    jmp .do_cr0_pg
 .pml4_ok:
-    ;; PML4[0] is correct — write 'V' (green) to col 4
-    vga_diag 'V', 0x0A, 4
-.pml4_done:
+    vga_diag 'V', 0x0A, 4   ; col 4: 'V' = PML4[0] verified correct
+.do_cr0_pg:
 
-    ;; Enable paging (which also activates long mode)
+    ;; Enable paging → activates IA-32e long mode (EFER.LMA becomes 1)
     mov eax, cr0
     or  eax, (1 << 31)  ; CR0.PG = 1
-    or  eax, (1 << 0)   ; CR0.PE = 1 (should already be set by GRUB)
+    or  eax, (1 << 0)   ; CR0.PE = 1 (already set by GRUB)
     mov cr0, eax
 
-    ;; Debug: 'e' — paging+long mode now active (compatibility mode)
-    mov dx, 0x3F8
-    mov al, 'e'
-    out dx, al
-    ;; VGA diag col 5: '4' = CR0.PG set, paging active!
-    vga_diag '4', 0x0A, 5
+    ;; If we reach here paging is now active
+    vga_diag '4', 0x0A, 5   ; col 5: '4' = CR0.PG set, IA-32e paging active
+    jmp .paging_done
 
-    ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
+    ;; ---------------------------------------------------------------
+    ;; IA-32e compatibility mode path: GRUB already set up paging/LM
+    ;; ---------------------------------------------------------------
+.paging_already_on:
+    ;; We are in 32-bit IA-32e compatibility mode (LMA=1, CR0.PG=1).
+    ;; CR3 was just loaded with our PML4 above.  No EFER/CR0.PG manipulation
+    ;; needed — long mode is already active.
+    vga_diag 'C', 0x0D, 2  ; col 2: 'C' = compat mode at entry (PG was 1)
+    vga_diag 'K', 0x0D, 3  ; col 3: 'K' = CR3 switched, long mode already on
+    vga_diag '4', 0x0A, 5  ; col 5: '4' = paging confirmed active
+
+.paging_done:
+    ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, VMA = physical)
     lgdt [gdt64_ptr]
 
     ;; Debug: 'f' — GDT loaded, about to far-jump to 64-bit CS
