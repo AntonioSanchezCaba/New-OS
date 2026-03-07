@@ -98,19 +98,17 @@ void fb_init(struct multiboot2_tag_framebuffer* fb_tag)
 
     /* Remap the physical framebuffer MMIO pages as uncached (Write-Through +
      * Cache-Disable) so writes bypass the CPU data cache and immediately
-     * reach the display device.  Required under KVM-accelerated QEMU where
-     * write-back cached stores to MMIO addresses are never intercepted by
-     * the hypervisor, causing a persistent black screen.                   */
+     * reach the display device.  Uses 4KB pages — v86/copy.sh does not
+     * support 2MB huge-page PDEs in IA-32e mode.                          */
     {
-        uint64_t _p   = phys & ~(uint64_t)0x1FFFFF;    /* 2 MB align down */
-        uint64_t _end = ((phys + (uint64_t)pitch * h) + 0x1FFFFF) &
-                        ~(uint64_t)0x1FFFFF;
-        for (; _p < _end && _p < 0x100000000ULL; _p += 0x200000) {
+        uint64_t _p   = phys & ~(uint64_t)0xFFF;       /* 4 KB align down */
+        uint64_t _end = ((phys + (uint64_t)pitch * h) + 0xFFF) & ~(uint64_t)0xFFF;
+        for (; _p < _end && _p < 0x100000000ULL; _p += PAGE_SIZE) {
             vmm_map_page(kernel_pml4, _p, _p,
-                         PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL | PTE_HUGE |
+                         PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL |
                          PTE_CACHE_DISABLE | PTE_WRITE_THROUGH);
         }
-        kinfo("framebuffer: MMIO pages remapped as write-through/uncached");
+        kinfo("framebuffer: MMIO pages remapped as write-through/uncached (4KB)");
     }
 
     /* Allocate back buffer in kernel heap */

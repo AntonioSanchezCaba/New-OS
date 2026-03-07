@@ -104,21 +104,22 @@ void vmm_init(void)
     kernel_pml4_phys = virt_to_phys_kernel(kernel_pml4);
 
     /*
-     * Map 0 - 4GB as identity (physical = virtual) with 2MB huge pages.
-     * This allows the kernel to access physical memory for device MMIO, etc.
+     * Map 0-128MB as identity (physical = virtual) with 4KB pages.
+     * 4KB pages are required for v86/copy.sh: enabling IA-32e paging
+     * with 2MB huge-page PDEs causes an immediate triple fault.
      *
-     * KERNEL_VMA_BASE also maps 0 - 2GB (the higher half mapping).
+     * 128MB covers: kernel image (~5MB), boot page tables (~1MB),
+     * kernel heap (64MB), and PMM frame pool with headroom.
+     *
+     * Device MMIO above 128MB (framebuffer at ~0xFD000000, PCI BARs,
+     * etc.) is mapped on demand by drivers via vmm_map_page().
      */
-    for (uint64_t addr = 0; addr < 0x100000000ULL; addr += 0x200000) {
-        /* Identity map: virt = phys */
+    for (uint64_t addr = 0; addr < (128ULL * 1024ULL * 1024ULL);
+         addr += PAGE_SIZE) {
         vmm_map_page(kernel_pml4, addr, addr,
-                     PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL | PTE_HUGE);
-
-        /* Higher half map: virt = KERNEL_VMA_BASE + phys */
-        if (addr < 0x80000000ULL) { /* First 2GB */
-            vmm_map_page(kernel_pml4, KERNEL_VMA_BASE + addr, addr,
-                         PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL | PTE_HUGE);
-        }
+                     PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL);
+        vmm_map_page(kernel_pml4, KERNEL_VMA_BASE + addr, addr,
+                     PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL);
     }
 
     /* Switch to the new page tables */

@@ -153,6 +153,19 @@ void kernel_main(struct multiboot2_info* mb2_info)
             multiboot2_find_tag(mb2_info, MULTIBOOT2_TAG_FRAMEBUFFER);
         if (_early_fb && _early_fb->framebuffer_type == 1 &&
             _early_fb->framebuffer_bpp == 32) {
+            /* Map framebuffer so fb_paint_panic() can write to it safely.
+             * vmm_init() only covers 0-128MB; MMIO at ~0xFD000000 needs
+             * an explicit mapping.  fb_init() will re-remap as uncached. */
+            {
+                uint64_t _p0 = (uint64_t)_early_fb->framebuffer_addr & ~(uint64_t)0xFFF;
+                uint64_t _pe = (_p0 + (uint64_t)_early_fb->framebuffer_pitch *
+                                       _early_fb->framebuffer_height + 0xFFF)
+                               & ~(uint64_t)0xFFF;
+                for (uint64_t _a = _p0; _a < _pe && _a < 0x100000000ULL;
+                     _a += PAGE_SIZE)
+                    vmm_map_page(kernel_pml4, _a, _a,
+                                 PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL);
+            }
             fb_raw_setup((uintptr_t)_early_fb->framebuffer_addr,
                          _early_fb->framebuffer_width,
                          _early_fb->framebuffer_height,
@@ -170,34 +183,41 @@ void kernel_main(struct multiboot2_info* mb2_info)
         }
     }
 
-    /* Early framebuffer stripe test (identity-map access, pre-heap).
-     * Paints the entire screen WHITE directly through the 0-4 GB identity
-     * map that vmm_init() just installed.  In copy.sh / v86 this is the
-     * first proof that framebuffer VRAM writes are actually reaching the
-     * canvas — if you see a white flash the VRAM path works.           */
+    /* Early framebuffer stripe test (pre-heap).
+     * vmm_init() now only maps 0-128MB; device MMIO above that must be
+     * mapped explicitly.  Map the framebuffer region with 4KB pages here
+     * so that direct VRAM writes work before fb_init() runs.           */
     {
         struct multiboot2_tag_framebuffer* _fbt =
             (struct multiboot2_tag_framebuffer*)
             multiboot2_find_tag(mb2_info, MULTIBOOT2_TAG_FRAMEBUFFER);
         if (_fbt && _fbt->framebuffer_type == 1 &&
             _fbt->framebuffer_bpp == 32) {
+            /* Map framebuffer pages (4KB, uncached) */
+            uint64_t _fb_phys  = _fbt->framebuffer_addr;
+            uint64_t _fb_size  = (uint64_t)_fbt->framebuffer_pitch *
+                                  _fbt->framebuffer_height;
+            uint64_t _fb_start = _fb_phys & ~(uint64_t)0xFFF;
+            uint64_t _fb_end   = (_fb_phys + _fb_size + 0xFFF) & ~(uint64_t)0xFFF;
+            for (uint64_t _a = _fb_start;
+                 _a < _fb_end && _a < 0x100000000ULL; _a += PAGE_SIZE) {
+                vmm_map_page(kernel_pml4, _a, _a,
+                             PTE_PRESENT | PTE_WRITABLE | PTE_GLOBAL |
+                             PTE_CACHE_DISABLE | PTE_WRITE_THROUGH);
+            }
+            kinfo("[BOOT] Framebuffer mapped: 0x%llx + %llu bytes",
+                  (unsigned long long)_fb_phys, (unsigned long long)_fb_size);
+
             volatile uint32_t* _vram =
-                (volatile uint32_t*)(uintptr_t)_fbt->framebuffer_addr;
+                (volatile uint32_t*)(uintptr_t)_fb_phys;
             uint32_t _w = _fbt->framebuffer_width;
             uint32_t _h = _fbt->framebuffer_height;
-            uint32_t _p = _fbt->framebuffer_pitch / 4; /* stride in px */
-            /* Fill full screen white so it is unmissable in v86 */
+            uint32_t _p = _fbt->framebuffer_pitch / 4;
             for (uint32_t _y = 0; _y < _h; _y++)
                 for (uint32_t _x = 0; _x < _w; _x++)
                     _vram[_y * _p + _x] = 0xFFFFFFFFu;
             __asm__ volatile("mfence" ::: "memory");
-            kinfo("[BOOT] Early VRAM test: full white screen written (should flash in v86)");
-        } else {
-            if (_fbt)
-                klog_warn("[BOOT] MB2 fb tag present but type=%u bpp=%u (not 32bpp linear)",
-                          _fbt->framebuffer_type, _fbt->framebuffer_bpp);
-            else
-                klog_warn("[BOOT] MB2 fb tag missing — no VRAM test possible");
+            kinfo("[BOOT] Early VRAM test: white screen written");
         }
     }
 
