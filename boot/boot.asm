@@ -2,6 +2,17 @@
 ;;;
 ;;; This file is the very first code that GRUB jumps to after loading our
 ;;; kernel. We arrive in 32-bit protected mode with:
+
+;;; Boot page table physical addresses (hardcoded low conventional memory).
+;;; Using 0x1000-0x7000 avoids any ELF NOLOAD / .boot.bss addressing issues
+;;; in v86/copy.sh. These pages are within the 0-6MB identity map.
+%define BOOT_PML4       0x1000
+%define BOOT_PDPT_LOW   0x2000
+%define BOOT_PDPT_HIGH  0x3000
+%define BOOT_PD         0x4000
+%define BOOT_PT0        0x5000
+%define BOOT_PT1        0x6000
+%define BOOT_PT2        0x7000
 ;;;   EAX = 0x36D76289 (Multiboot2 magic)
 ;;;   EBX = physical address of Multiboot2 info structure
 ;;;
@@ -113,8 +124,8 @@ _start:
     or  eax, (1 << 5)   ; CR4.PAE
     mov cr4, eax
 
-    ;; Load PML4 into CR3 (boot_pml4 physical address = VMA for boot.bss)
-    mov eax, boot_pml4
+    ;; Load PML4 into CR3 (hardcoded low physical address)
+    mov eax, BOOT_PML4
     mov cr3, eax
 
     ;; Enable Long Mode via the EFER MSR
@@ -131,6 +142,19 @@ _start:
     ;; VGA diag col 2: '3' = EFER.LME set, about to enable paging
     vga_diag '3', 0x0E, 2
 
+    ;; Verify PML4[0] has the expected value before enabling paging.
+    ;; Expected: BOOT_PDPT_LOW | 3 = 0x2003
+    mov eax, [BOOT_PML4]
+    cmp eax, (BOOT_PDPT_LOW | 3)
+    je  .pml4_ok
+    ;; PML4[0] is WRONG — write 'W' (red) to col 3
+    vga_diag 'W', 0x0C, 3
+    jmp .pml4_done
+.pml4_ok:
+    ;; PML4[0] is correct — write 'V' (green) to col 3
+    vga_diag 'V', 0x0A, 3
+.pml4_done:
+
     ;; Enable paging (which also activates long mode)
     mov eax, cr0
     or  eax, (1 << 31)  ; CR0.PG = 1
@@ -141,8 +165,8 @@ _start:
     mov dx, 0x3F8
     mov al, 'e'
     out dx, al
-    ;; VGA diag col 3: '4' = CR0.PG set, paging active!
-    vga_diag '4', 0x0A, 3
+    ;; VGA diag col 4: '4' = CR0.PG set, paging active!
+    vga_diag '4', 0x0A, 4
 
     ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
     lgdt [gdt64_ptr]
@@ -245,53 +269,49 @@ check_long_mode:
 ;;;   PML4[0]   -> PDPT_LOW[0]   -> PD[0..2] -> PT0, PT1, PT2
 ;;;   PML4[511] -> PDPT_HIGH[510]-> PD[0..2] -> PT0, PT1, PT2
 ;;;   PT[n] = (n * 4096) | 3  (identity-mapped 4KB pages, 0..6MB)
-;;;
-;;; 4KB pages are used because v86/copy.sh does not support 2MB
-;;; huge-page (PS-bit) PDEs in IA-32e mode — enabling paging with
-;;; huge pages causes an immediate triple fault.
 ;;; =========================================================
 setup_page_tables:
-    ;; All boot_* symbols are in .boot.bss: VMA = LMA = physical address.
+    cld             ; Ensure forward direction for stosd
 
     ;; Clear 7 pages: PML4, PDPT_LOW, PDPT_HIGH, PD, PT0, PT1, PT2
-    mov edi, boot_pml4
+    mov edi, BOOT_PML4
     xor eax, eax
     mov ecx, (7 * 4096) / 4
     rep stosd
 
     ;; ---- PML4 ----
-    mov eax, boot_pdpt_low
+    mov eax, BOOT_PDPT_LOW
     or  eax, 3                          ; Present + RW
-    mov [boot_pml4], eax                ; PML4[0] -> PDPT_LOW
+    mov [BOOT_PML4], eax                ; PML4[0] -> PDPT_LOW
 
-    mov eax, boot_pdpt_high
+    mov eax, BOOT_PDPT_HIGH
     or  eax, 3
-    mov [boot_pml4 + 511*8], eax        ; PML4[511] -> PDPT_HIGH
+    mov [BOOT_PML4 + 511*8], eax        ; PML4[511] -> PDPT_HIGH
 
     ;; ---- PDPTs (both point to the same PD) ----
-    mov eax, boot_pd
+    mov eax, BOOT_PD
     or  eax, 3
-    mov [boot_pdpt_low], eax            ; PDPT_LOW[0] -> PD
+    mov [BOOT_PDPT_LOW], eax            ; PDPT_LOW[0] -> PD
 
     ;; PDPT_HIGH[510] -> same PD (VA 0xFFFFFFFF80000000 -> PML4[511], PDPT[510])
-    mov [boot_pdpt_high + 510*8], eax   ; PDPT_HIGH[510] -> PD
+    mov [BOOT_PDPT_HIGH + 510*8], eax   ; PDPT_HIGH[510] -> PD
 
     ;; ---- PD entries (4KB page tables, no PS/huge bit) ----
-    mov eax, boot_pt0
+    mov eax, BOOT_PT0
     or  eax, 3
-    mov [boot_pd], eax                  ; PD[0] -> PT0 (covers 0..2MB)
+    mov [BOOT_PD], eax                  ; PD[0] -> PT0 (covers 0..2MB)
 
-    mov eax, boot_pt1
+    mov eax, BOOT_PT1
     or  eax, 3
-    mov [boot_pd + 8], eax              ; PD[1] -> PT1 (covers 2MB..4MB)
+    mov [BOOT_PD + 8], eax              ; PD[1] -> PT1 (covers 2MB..4MB)
 
-    mov eax, boot_pt2
+    mov eax, BOOT_PT2
     or  eax, 3
-    mov [boot_pd + 16], eax             ; PD[2] -> PT2 (covers 4MB..6MB)
+    mov [BOOT_PD + 16], eax             ; PD[2] -> PT2 (covers 4MB..6MB)
 
     ;; ---- Fill PT0 + PT1 + PT2 with identity-mapped 4KB entries ----
     ;; PT[n] = (n * 4096) | 3, for n = 0 .. 3*512-1
-    mov edi, boot_pt0
+    mov edi, BOOT_PT0
     mov eax, 0x003          ; PA=0, Present+RW
     mov ecx, 3 * 512        ; 1536 entries across 3 PTs
 .fill_pts:
@@ -415,8 +435,8 @@ section .text
 extern kernel_main
 
 long_mode_entry:
-    ;; VGA diag col 4: '5' = 64-bit long mode reached
-    mov word [0xB8000 + (24 * 80 + 4) * 2], (0x0D << 8) | '5'
+    ;; VGA diag col 5: '5' = 64-bit long mode reached
+    mov word [0xB8000 + (24 * 80 + 5) * 2], (0x0D << 8) | '5'
     ;; Debug: 'F' — 64-bit long mode reached!
     mov dx, 0x3F8
     mov al, 'F'
