@@ -40,6 +40,16 @@ mb2_header_start:
     dd  mb2_header_end - mb2_header_start        ; Header length
     dd  -(0xE85250D6 + 0 + (mb2_header_end - mb2_header_start)) ; Checksum
 
+    ;; EFI amd64 entry address tag (type 9, optional)
+    ;; When GRUB is running as a 64-bit EFI application it calls _start_efi64
+    ;; directly in long mode, bypassing the entire EFER.LME dance.
+    ;; If GRUB is a BIOS application it ignores this tag (flags bit 0 = optional).
+    align 8
+    dw  9                                        ; Tag type: EFI amd64 entry addr
+    dw  1                                        ; flags bit 0: optional
+    dd  12                                       ; Tag size
+    dd  (_start_efi64 - KERNEL_VMA_OFFSET)       ; Physical entry address
+
     align 8
     ;; End tag (required)
     dw  0
@@ -146,13 +156,17 @@ _start:
     ;; ---------------------------------------------------------------
     vga_diag 'P', 0x0B, 2  ; col 2: 'P' = entered as 32-bit PM (PG was 0)
 
-    ;; Set EFER.LME (direct write, no RDMSR first to avoid #GP artifacts)
+    ;; Set EFER.LME via read-modify-write (proper sequence per Intel spec).
+    ;; We read first so any existing bits (NXE, SCE, etc.) are preserved.
+    ;; If v86/copy.sh raises #GP for WRMSR when CPUID[80000001h][29]=0,
+    ;; GRUB's IDT handler returns via IRET → EFER unchanged → we see 'N'.
     mov ecx, 0xC0000080
-    xor edx, edx
-    mov eax, (1 << 8)       ; EFER.LME = 1
-    wrmsr
+    rdmsr                       ; Read current EFER into EDX:EAX
+    or  eax, (1 << 8)           ; Set LME bit
+    wrmsr                       ; Write back
 
-    ;; Diagnostic-only readback (may return 0 due to v86 #GP; not a gate)
+    ;; Diagnostic-only readback to verify whether WRMSR was honoured.
+    mov ecx, 0xC0000080
     rdmsr
     test eax, (1 << 8)
     jz  .efer_readback_zero
@@ -461,6 +475,145 @@ section .text
 [BITS 64]
 
 extern kernel_main
+
+;;; =========================================================
+;;; _start_efi64 — Multiboot2 EFI amd64 entry (tag type 9)
+;;;
+;;; Called by GRUB when it is running as a 64-bit EFI application.
+;;; Machine state at entry:
+;;;   RAX = Multiboot2 magic (0x36D76289)
+;;;   RBX = physical address of Multiboot2 info structure
+;;;   64-bit long mode active, GRUB's own paging in effect
+;;;   Interrupts may be enabled; GRUB's GDT/IDT still loaded
+;;;
+;;; We must:
+;;;   1. Switch to a safe temporary stack (avoids dependency on GRUB stack)
+;;;   2. Set up our page tables at 0x1000-0x7000
+;;;   3. Switch CR3 to our PML4
+;;;   4. Load our 64-bit GDT and reload CS/DS
+;;;   5. Set up the real kernel stack and call kernel_main
+;;; =========================================================
+global _start_efi64
+_start_efi64:
+    cli                         ; Disable interrupts — we're about to switch GDT/CR3
+
+    ;; VGA diag col 0: 'E' = EFI64 entry (vs '1' for 32-bit PM entry)
+    mov word [0xB8000 + (24 * 80 + 0) * 2], (0x0A << 8) | 'E'
+
+    ;; Save multiboot info pointer (RBX) before clobbering anything.
+    ;; multiboot_info_ptr lives in .boot.bss; its LMA = VMA = physical address.
+    mov [multiboot_info_ptr], rbx
+
+    ;; Switch to a temporary stack in low conventional memory.
+    ;; Page tables occupy 0x1000-0x7FFF; use 0x8FF0 as a safe 16-byte-aligned top.
+    ;; This avoids any dependency on GRUB's stack after we switch page tables.
+    mov rsp, 0x8FF0
+
+    ;; Set up our page tables (identity 0-6MB + higher-half at 0xFFFFFFFF80000000)
+    call setup_page_tables_64
+
+    ;; VGA diag col 1: '2' = page tables built
+    mov word [0xB8000 + (24 * 80 + 1) * 2], (0x0B << 8) | '2'
+
+    ;; Switch to our PML4 (GRUB's paging replaced; our identity map keeps
+    ;; the next instruction fetch valid since this code is within 0-6MB).
+    mov rax, BOOT_PML4
+    mov cr3, rax
+
+    ;; Load our 64-bit GDT (physical address; still identity-mapped now)
+    lgdt [gdt64_ptr]
+
+    ;; Far return to reload CS = 0x08 (our 64-bit code segment).
+    ;; push RIP first, then CS; o64 retf pops 64-bit RIP then 16-bit CS.
+    lea  rax, [rel .cs_reloaded]
+    push qword 0x08
+    push rax
+    o64 retf
+
+.cs_reloaded:
+    ;; Update all data segment registers to kernel data selector
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    ;; Switch to the real kernel stack (virtual higher-half address)
+    mov rsp, kernel_stack_top
+
+    ;; Reload GDT pointer using virtual address (higher-half mapping now active)
+    lgdt [gdt64_ptr_virt]
+
+    ;; VGA diag col 5: '4' = long mode fully set up (mirrors 32-bit PM path)
+    mov word [0xB8000 + (24 * 80 + 5) * 2], (0x0A << 8) | '4'
+
+    ;; Clear frame pointer for stack-trace termination
+    xor rbp, rbp
+
+    ;; First argument: multiboot2 info pointer, adjusted to virtual address
+    mov rdi, [multiboot_info_ptr]
+    add rdi, KERNEL_VMA_OFFSET
+
+    ;; Jump into the common 64-bit entry (sets up segments, VGA diag col 6, etc.)
+    jmp long_mode_entry
+
+;;; =========================================================
+;;; setup_page_tables_64 — 64-bit version of setup_page_tables
+;;;
+;;; Sets up the same 4-level paging structure as the 32-bit version:
+;;;   Identity map 0-6MB (low half)
+;;;   Higher-half map 0xFFFFFFFF80000000 → physical 0
+;;; Uses rep stosq (not stosd) for proper 64-bit clearing.
+;;; Safe to call before or after CR3 switch.
+;;; Clobbers: RAX, RCX, RDI
+;;; =========================================================
+setup_page_tables_64:
+    ;; Clear 7 pages: PML4, PDPT_LOW, PDPT_HIGH, PD, PT0, PT1, PT2
+    mov rdi, BOOT_PML4
+    xor rax, rax
+    mov rcx, (7 * 4096) / 8    ; 64-bit clear (stosq = 8 bytes per iteration)
+    rep stosq
+
+    ;; ---- PML4 ----
+    mov rax, BOOT_PDPT_LOW
+    or  rax, 7                          ; Present + RW + U/S
+    mov [BOOT_PML4], rax                ; PML4[0] -> PDPT_LOW
+
+    mov rax, BOOT_PDPT_HIGH
+    or  rax, 7
+    mov [BOOT_PML4 + 511*8], rax        ; PML4[511] -> PDPT_HIGH
+
+    ;; ---- PDPTs ----
+    mov rax, BOOT_PD
+    or  rax, 7
+    mov [BOOT_PDPT_LOW], rax            ; PDPT_LOW[0] -> PD
+    mov [BOOT_PDPT_HIGH + 510*8], rax   ; PDPT_HIGH[510] -> PD
+
+    ;; ---- PD entries ----
+    mov rax, BOOT_PT0
+    or  rax, 7
+    mov [BOOT_PD], rax                  ; PD[0] -> PT0
+
+    mov rax, BOOT_PT1
+    or  rax, 7
+    mov [BOOT_PD + 8], rax              ; PD[1] -> PT1
+
+    mov rax, BOOT_PT2
+    or  rax, 7
+    mov [BOOT_PD + 16], rax             ; PD[2] -> PT2
+
+    ;; ---- Fill PTs: identity-mapped 4KB pages 0..6MB ----
+    mov rdi, BOOT_PT0
+    mov rax, 0x007                      ; PA=0, Present+RW+U/S
+    mov rcx, 3 * 512                    ; 1536 entries across 3 page tables
+.fill_pts_64:
+    mov  [rdi], rax
+    add  rdi, 8
+    add  rax, 0x1000
+    loop .fill_pts_64
+
+    ret
 
 long_mode_entry:
     ;; VGA diag col 6: '5' = 64-bit long mode reached
