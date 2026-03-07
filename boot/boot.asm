@@ -42,10 +42,20 @@ mb2_header_end:
 section .boot.text
 [BITS 32]
 
+;;; VGA diagnostic: write char CH (with attribute AT) to row 24 col COL
+;;; Usage: %vga_diag CH, AT, COL   (all literals, no registers clobbered except via ecx/edi)
+;;; Safe to use before paging (physical 0xB8000 accessible in 32-bit PM)
+%macro vga_diag 3    ; CH, ATTR, COL
+    mov  word [0xB8000 + (24 * 80 + %3) * 2], (%2 << 8) | %1
+%endmacro
+
 global _start
 _start:
     ;; Disable interrupts immediately
     cli
+
+    ;; VGA diag col 0: '1' cyan-on-black = 32-bit entry reached
+    vga_diag '1', 0x0B, 0
 
     ;; === Early serial debug: write 'A' to COM1 (0x3F8) ===
     ;; Works even without full UART init — BIOS/GRUB leave UART usable.
@@ -95,6 +105,8 @@ _start:
     mov dx, 0x3F8
     mov al, 'D'
     out dx, al
+    ;; VGA diag col 1: '2' = page tables written
+    vga_diag '2', 0x0B, 1
 
     ;; Enable PAE (Physical Address Extension) - required for long mode
     mov eax, cr4
@@ -116,6 +128,8 @@ _start:
     mov dx, 0x3F8
     mov al, 'E'
     out dx, al
+    ;; VGA diag col 2: '3' = EFER.LME set, about to enable paging
+    vga_diag '3', 0x0E, 2
 
     ;; Enable paging (which also activates long mode)
     mov eax, cr0
@@ -127,6 +141,8 @@ _start:
     mov dx, 0x3F8
     mov al, 'e'
     out dx, al
+    ;; VGA diag col 3: '4' = CR0.PG set, paging active!
+    vga_diag '4', 0x0A, 3
 
     ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, physical = VMA)
     lgdt [gdt64_ptr]
@@ -399,6 +415,8 @@ section .text
 extern kernel_main
 
 long_mode_entry:
+    ;; VGA diag col 4: '5' = 64-bit long mode reached
+    mov word [0xB8000 + (24 * 80 + 4) * 2], (0x0D << 8) | '5'
     ;; Debug: 'F' — 64-bit long mode reached!
     mov dx, 0x3F8
     mov al, 'F'
