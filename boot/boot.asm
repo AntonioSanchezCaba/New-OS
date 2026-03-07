@@ -29,14 +29,6 @@ mb2_header_start:
     dd  mb2_header_end - mb2_header_start        ; Header length
     dd  -(0xE85250D6 + 0 + (mb2_header_end - mb2_header_start)) ; Checksum
 
-    ;; Framebuffer tag (request 1024x768 32bpp linear framebuffer)
-    dw  5                   ; Tag type: framebuffer
-    dw  1                   ; Flags: optional (don't fail if unsupported)
-    dd  20                  ; Size
-    dd  1024                ; Preferred width
-    dd  768                 ; Preferred height
-    dd  32                  ; Preferred depth (32bpp)
-
     align 8
     ;; End tag (required)
     dw  0
