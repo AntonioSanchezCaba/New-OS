@@ -308,7 +308,7 @@ $(KERNEL_BIN): $(ALL_OBJS) linker.ld
 iso: $(KERNEL_BIN)
 	@echo "  Creating bootable ISO..."
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.elf
-	@printf 'set timeout=5\nset default=0\n\nmenuentry "AetherOS v1.0.0 — Genesis" {\n    insmod all_video\n    set gfxpayload=1024x768x32,1024x768\n    multiboot2 /boot/kernel.elf\n    boot\n}\n\nmenuentry "AetherOS (800x600 safe mode)" {\n    insmod all_video\n    set gfxpayload=800x600x32,800x600\n    multiboot2 /boot/kernel.elf\n    boot\n}\n' \
+	@printf 'set timeout=0\nset default=0\n\nmenuentry "AetherOS v1.0.0" {\n    multiboot2 /boot/kernel.elf\n    boot\n}\n' \
 	  > $(GRUBDIR)/grub.cfg
 	@grub-mkrescue -o $(KERNEL_ISO) $(ISODIR) 2>/dev/null || \
 	 grub2-mkrescue -o $(KERNEL_ISO) $(ISODIR) 2>/dev/null || \
