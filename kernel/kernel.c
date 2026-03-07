@@ -98,9 +98,9 @@ static void bootanim_timer_cb(uint64_t ticks __attribute__((unused)))
  */
 void kernel_main(struct multiboot2_info* mb2_info)
 {
-    /* Earliest diagnostic: write '6' to VGA row 24 col 5 via identity map.
-     * Boot page tables cover 0-6MB identity; 0xB8000 is within range. */
-    *(volatile uint16_t*)((uintptr_t)0xB8000 + (24*80+7)*2) = (uint16_t)(0x4F00 | '6');
+    /* Earliest diagnostic: write '6' to VGA row 24 col 8 via identity map.
+     * Col map: 0=entry 1=pgtbl 2=CPUID-LM 3=mode 4=EFER 5=PML4 6='4' 7='5' 8=here */
+    *(volatile uint16_t*)((uintptr_t)0xB8000 + (24*80+8)*2) = (uint16_t)(0x4F00 | '6');
 
     /* === Phase 1: Essential output (no memory, no interrupts) === */
     serial_init(COM1_PORT, UART_BAUD_115200);   /* [STABLE] */

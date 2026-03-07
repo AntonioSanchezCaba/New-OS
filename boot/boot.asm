@@ -129,6 +129,24 @@ _start:
     ;; VGA diag col 1: '2' = page tables written
     vga_diag '2', 0x0B, 1
 
+    ;; === CPUID long-mode check (diagnostic, col 2) ===
+    ;; Check CPUID 0x80000001 EDX[29] = LM bit.
+    ;; v86/copy.sh with SeaBIOS GRUB returns LM=0 here, which causes WRMSR
+    ;; for EFER.LME to GP/NOP.  Show result at col 2 before attempting EFER.
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb  .cpuid_no_lm        ; extended functions not available → definitely no LM
+    mov eax, 0x80000001
+    cpuid
+    test edx, (1 << 29)     ; LM bit
+    jz  .cpuid_no_lm
+    vga_diag 'Y', 0x0A, 2  ; col 2: 'Y' green = CPUID says LM supported
+    jmp .cpuid_lm_done
+.cpuid_no_lm:
+    vga_diag 'n', 0x0E, 2  ; col 2: 'n' yellow = CPUID says NO long mode
+.cpuid_lm_done:
+
     ;; Enable PAE (Physical Address Extension) - required for long mode
     ;; (no-op if we're already in IA-32e; harmless to set again)
     mov eax, cr4
@@ -154,7 +172,12 @@ _start:
     ;; ---------------------------------------------------------------
     ;; 32-bit protected mode path: need to activate long mode ourselves
     ;; ---------------------------------------------------------------
-    vga_diag 'P', 0x0B, 2  ; col 2: 'P' = entered as 32-bit PM (PG was 0)
+    vga_diag 'P', 0x0B, 3  ; col 3: 'P' = entered as 32-bit PM (PG was 0)
+
+    ;; Serial 'E': about to attempt EFER.LME WRMSR
+    mov dx, 0x3F8
+    mov al, 'E'
+    out dx, al
 
     ;; Set EFER.LME via read-modify-write (proper sequence per Intel spec).
     ;; We read first so any existing bits (NXE, SCE, etc.) are preserved.
@@ -165,26 +188,71 @@ _start:
     or  eax, (1 << 8)           ; Set LME bit
     wrmsr                       ; Write back
 
-    ;; Diagnostic-only readback to verify whether WRMSR was honoured.
+    ;; Readback: verify whether WRMSR was honoured.
+    ;; Serial 'F' confirms we survived WRMSR (it didn't halt/triple-fault).
+    mov dx, 0x3F8
+    mov al, 'F'
+    out dx, al
     mov ecx, 0xC0000080
     rdmsr
     test eax, (1 << 8)
     jz  .efer_readback_zero
-    vga_diag 'L', 0x0A, 3   ; col 3: 'L' = RDMSR confirmed LME set
-    jmp .efer_cont
-.efer_readback_zero:
-    vga_diag 'N', 0x0E, 3   ; col 3: 'N' = RDMSR returned 0 (possible #GP)
-.efer_cont:
+    vga_diag 'L', 0x0A, 4   ; col 4: 'L' green = EFER.LME confirmed set
+    jmp .efer_ok
 
+    ;; ---------------------------------------------------------------
+    ;; EFER.LME readback = 0: WRMSR was a NOP (v86 SeaBIOS 32-bit CPU).
+    ;; Proceeding to CR0.PG from here will ALWAYS triple-fault because:
+    ;;   PAE=1, LME=0 → 32-bit PAE mode → PDPT reserved bits [2:1] set → #GP.
+    ;; Halt gracefully with an error banner rather than resetting in a loop.
+    ;; ---------------------------------------------------------------
+.efer_readback_zero:
+    vga_diag 'N', 0x0C, 4   ; col 4: 'N' red = EFER.LME stuck at 0
+    ;; Serial 'N' so it shows in serial console
+    mov dx, 0x3F8
+    mov al, 'N'
+    out dx, al
+
+    ;; White-on-red banner on VGA row 0
+    mov edi, 0xB8000
+    mov esi, efer_error_line1
+    mov ah, 0x4F            ; White text on red background
+.efer_err1:
+    lodsb
+    test al, al
+    jz .efer_err2
+    stosw
+    jmp .efer_err1
+.efer_err2:
+    ;; White-on-red row 1
+    mov edi, 0xB8000 + 80*2
+    mov esi, efer_error_line2
+.efer_err3:
+    lodsb
+    test al, al
+    jz .efer_halt
+    stosw
+    jmp .efer_err3
+.efer_halt:
+    cli
+    hlt
+    jmp .efer_halt          ; Loop if NMI wakes us up
+
+.efer_ok:
     ;; Verify PML4[0] value (flags=0x07)
     mov eax, [BOOT_PML4]
     cmp eax, (BOOT_PDPT_LOW | 7)
     je  .pml4_ok
-    vga_diag 'W', 0x0C, 4   ; col 4: 'W' = PML4[0] wrong
+    vga_diag 'W', 0x0C, 5   ; col 5: 'W' = PML4[0] wrong
     jmp .do_cr0_pg
 .pml4_ok:
-    vga_diag 'V', 0x0A, 4   ; col 4: 'V' = PML4[0] verified correct
+    vga_diag 'V', 0x0A, 5   ; col 5: 'V' = PML4[0] verified correct
 .do_cr0_pg:
+
+    ;; Serial 'G': about to set CR0.PG
+    mov dx, 0x3F8
+    mov al, 'G'
+    out dx, al
 
     ;; Enable paging → activates IA-32e long mode (EFER.LMA becomes 1)
     mov eax, cr0
@@ -192,8 +260,11 @@ _start:
     or  eax, (1 << 0)   ; CR0.PE = 1 (already set by GRUB)
     mov cr0, eax
 
-    ;; If we reach here paging is now active
-    vga_diag '4', 0x0A, 5   ; col 5: '4' = CR0.PG set, IA-32e paging active
+    ;; If we reach here paging is now active — serial 'H', VGA col 6: '4'
+    mov dx, 0x3F8
+    mov al, 'H'
+    out dx, al
+    vga_diag '4', 0x0A, 6   ; col 6: '4' = CR0.PG set, IA-32e paging active
     jmp .paging_done
 
     ;; ---------------------------------------------------------------
@@ -203,9 +274,9 @@ _start:
     ;; We are in 32-bit IA-32e compatibility mode (LMA=1, CR0.PG=1).
     ;; CR3 was just loaded with our PML4 above.  No EFER/CR0.PG manipulation
     ;; needed — long mode is already active.
-    vga_diag 'C', 0x0D, 2  ; col 2: 'C' = compat mode at entry (PG was 1)
-    vga_diag 'K', 0x0D, 3  ; col 3: 'K' = CR3 switched, long mode already on
-    vga_diag '4', 0x0A, 5  ; col 5: '4' = paging confirmed active
+    vga_diag 'C', 0x0D, 3  ; col 3: 'C' = compat mode at entry (PG was 1)
+    vga_diag 'K', 0x0D, 4  ; col 4: 'K' = CR3 switched, long mode already on
+    vga_diag '4', 0x0A, 6  ; col 6: '4' = paging confirmed active
 
 .paging_done:
     ;; Load our 64-bit GDT (gdt64_ptr is in .boot.data, VMA = physical)
@@ -396,6 +467,13 @@ section .boot.data
 msg_no_multiboot:   db "ERROR: Not loaded by Multiboot2 bootloader!", 0
 msg_no_cpuid:       db "ERROR: CPUID not supported by this CPU!", 0
 msg_no_long_mode:   db "ERROR: 64-bit Long Mode not supported by this CPU!", 0
+
+;; EFER.LME failure banner (white-on-red, rows 0 and 1)
+;; Written directly to VGA by the .efer_readback_zero handler.
+efer_error_line1:
+    db "*** EFER.LME WRMSR FAILED: v86/copy.sh SeaBIOS GRUB presents 32-bit-only CPU ***", 0
+efer_error_line2:
+    db "    To run AetherOS: use QEMU  (make run)  or configure copy.sh with UEFI GRUB    ", 0
 
 ;;; =========================================================
 ;;; 64-bit GDT
@@ -616,8 +694,8 @@ setup_page_tables_64:
     ret
 
 long_mode_entry:
-    ;; VGA diag col 6: '5' = 64-bit long mode reached
-    mov word [0xB8000 + (24 * 80 + 6) * 2], (0x0D << 8) | '5'
+    ;; VGA diag col 7: '5' = 64-bit long mode reached
+    mov word [0xB8000 + (24 * 80 + 7) * 2], (0x0D << 8) | '5'
     ;; Debug: 'F' — 64-bit long mode reached!
     mov dx, 0x3F8
     mov al, 'F'
