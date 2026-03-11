@@ -337,6 +337,11 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("[BOOT] USB stub OK");
 
     /* === Phase 4d: PCI bus and network === */
+    /* Enable interrupts now — IDT, PIC, and timer are fully initialised.
+     * The DHCP client busy-waits on timer_get_ticks() and the e1000 relies
+     * on IRQ delivery; both require interrupts to be enabled first. */
+    cpu_sti();
+
     kinfo("Scanning PCI bus...");
     pci_init();                                  /* [STABLE] */
     kinfo("[BOOT] PCI scan OK");
@@ -410,9 +415,8 @@ void kernel_main(struct multiboot2_info* mb2_info)
     /* === Phase 9: Enable interrupts and start scheduling === */
     kernel_state = KERNEL_STATE_RUNNING;
     kinfo("[BOOT] ========================================");
-    kinfo("[BOOT] All subsystems initialized. Enabling interrupts.");
+    kinfo("[BOOT] All subsystems initialized.");
     kinfo("[BOOT] ========================================");
-    cpu_sti();
 
     /* === Phase 9: Launch userland === */
     init_userland();
