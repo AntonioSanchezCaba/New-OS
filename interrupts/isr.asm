@@ -142,14 +142,17 @@ isr_common:
     ;; Pass pointer to the saved register frame as first argument (RDI)
     mov     rdi, rsp
 
-    ;; Align stack to 16 bytes (required by System V AMD64 ABI for function calls)
+    ;; Align stack to 16 bytes (required by System V AMD64 ABI for function calls).
+    ;; Save pre-alignment RSP in RBP — a callee-saved register that interrupt_dispatch
+    ;; must preserve, unlike RDI (caller-saved) which the callee may clobber.
+    mov     rbp, rsp
     and     rsp, ~0xF
 
     ;; Call the C interrupt dispatcher
     call    interrupt_dispatch
 
-    ;; Restore stack alignment (undo the 'and' above by reloading RSP from frame)
-    mov     rsp, rdi
+    ;; Restore pre-alignment RSP via callee-saved RBP (guaranteed unchanged by callee)
+    mov     rsp, rbp
 
     ;; Restore general-purpose registers
     pop     r15
