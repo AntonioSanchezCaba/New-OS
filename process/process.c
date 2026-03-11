@@ -172,7 +172,8 @@ process_t* process_create(const char* name, void (*entry)(void), bool kernel)
     /* Initialize CPU context */
     memset(&proc->context, 0, sizeof(cpu_context_t));
     proc->context.rsp    = initial_rsp;
-    proc->context.rip    = (uint64_t)kernel_thread_entry;
+    proc->context.rip    = (uint64_t)kernel_thread_entry; /* debug snapshot */
+    proc->context.rbx    = (uint64_t)entry;  /* kernel_thread_entry calls rbx */
     proc->context.rflags = 0x202; /* IF=1 */
     proc->context.cs     = GDT_KERNEL_CODE;
     proc->context.ss     = GDT_KERNEL_DATA;

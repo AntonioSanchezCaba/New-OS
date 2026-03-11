@@ -61,10 +61,13 @@ context_switch:
     push    qword [rsi + 64]
     popfq
 
-    ;; Jump to the saved RIP of the new context
-    ;; This simulates returning from context_switch() in the new thread
-    mov     rax, [rsi + 56]
-    jmp     rax
+    ;; Return to the caller's saved address via the stack.
+    ;; For an existing thread: [RSP] is the return address of the original
+    ;;   "call context_switch" — ret pops it and restores RSP correctly.
+    ;; For a newly created thread: [RSP] is kernel_thread_entry, pushed
+    ;;   by setup_kernel_stack — ret jumps there and leaves RSP pointing
+    ;;   at the entry-function pointer also pushed by setup_kernel_stack.
+    ret
 
 
 ;;; ============================================================
