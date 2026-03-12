@@ -430,33 +430,13 @@ void kernel_main(struct multiboot2_info* mb2_info)
      * (~800 ms) so the progress bar fills smoothly, then spin-wait for
      * the fade-out to complete before handing off to the render engine.
      */
+    /* Boot animation disabled for diagnostic — fb_flip() from timer ISR
+     * (3 MB memcpy to VRAM) may prevent EOI causing timer to stall.
+     * Re-enable once GUI is confirmed working. */
     if (fb_ready()) {
-        kinfo("Playing boot animation...");
-        bootanim_start();
-        timer_register_callback(bootanim_timer_cb);
-
-        /* Advance one step every ~14 ticks (140 ms).
-         * 5 steps × 14 ticks = 70 ticks ≈ fits the 80-tick PROGRESS phase. */
-        for (int step = 0; step < 5; step++) {
-            uint32_t t0 = (uint32_t)timer_ticks();
-            while ((uint32_t)timer_ticks() - t0 < 14)
-                scheduler_yield();
-            bootanim_step_done();
-        }
-
-        /* Wait for the fade-out phase to complete — with safety timeout */
-        {
-            uint32_t _anim_deadline = (uint32_t)timer_ticks()
-                                    + BOOTANIM_TOTAL_TICKS + 50;
-            while (!bootanim_done() &&
-                   (uint32_t)timer_ticks() < _anim_deadline)
-                scheduler_yield();
-        }
-
-        timer_register_callback(NULL);   /* release the callback slot */
-        fb_clear(0xFF000000);            /* clean black for ARE handoff */
+        fb_clear(0xFF000000);
         fb_flip();
-        kinfo("Boot animation complete.");
+        kinfo("Boot animation skipped (diagnostic mode).");
     }
 
     /* === Phase 10: Enter Aether Render Engine (replaces gui_run) === */

@@ -212,6 +212,22 @@ void login_run(void)
     g_blink_tick   = timer_get_ticks();
     g_cursor_vis   = true;
 
+    /* Diagnostic: paint a red-and-white stripe pattern for ~1 second to
+     * confirm that login_run() is running AND draw_rect+fb_flip reach VRAM.
+     * If the user sees alternating stripes, login_run() works; the bug is
+     * purely cosmetic inside draw_login_screen().  Remove once confirmed. */
+    {
+        uint32_t stripe_h = 30;
+        for (uint32_t row = 0; row < (uint32_t)screen.height; row++) {
+            uint32_t col = (row / stripe_h) % 2 ? 0xFFFFFFFFu : 0xFFFF0000u;
+            for (uint32_t x = 0; x < (uint32_t)screen.width; x++)
+                screen.pixels[row * (uint32_t)screen.stride + x] = col;
+        }
+        fb_flip();
+        uint32_t _t = timer_get_ticks();
+        while (timer_get_ticks() - _t < 100) {}  /* hold ~1 second */
+    }
+
     uint8_t prev_kb_char = 0;
     bool    prev_enter   = false;
 
