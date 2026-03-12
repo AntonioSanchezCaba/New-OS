@@ -50,6 +50,18 @@ mb2_header_start:
     dd  12                                       ; Tag size
     dd  (_start_efi64 - KERNEL_VMA_OFFSET)       ; Physical entry address
 
+    ;; Framebuffer request tag (type 5) — ask GRUB for a linear 32bpp buffer.
+    ;; Width/height/bpp of 0 means "no preference — use whatever is set".
+    ;; Without this tag GRUB never fills in the Multiboot2 framebuffer info
+    ;; struct, so fb_init() never sees a valid tag and fb_ready() stays false.
+    align 8
+    dw  5                                        ; Tag type: framebuffer request
+    dw  0                                        ; flags: required
+    dd  20                                       ; Tag size (5 fields × 4 bytes)
+    dd  1024                                     ; preferred width  (0 = any)
+    dd  768                                      ; preferred height (0 = any)
+    dd  32                                       ; preferred bpp    (0 = any)
+
     align 8
     ;; End tag (required)
     dw  0
