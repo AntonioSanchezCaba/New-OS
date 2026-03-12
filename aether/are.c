@@ -641,17 +641,28 @@ void are_run(void)
         return;
     }
 
-    /* Diagnostic: brief bright-green flash confirms are_run() was entered.
-     * Remove once GUI visibility is confirmed working. */
-    {
-        fb_clear(0xFF00FF00u);   /* bright green — unmistakable non-blue colour */
-        fb_flip();
-        uint32_t _t = timer_get_ticks();
-        while (timer_get_ticks() - _t < 50) scheduler_yield(); /* ~500 ms */
-    }
+    /* ---- DIAGNOSTIC COLOUR CHAIN (remove when GUI confirmed working) ----
+     * Each colour = a checkpoint.  Whichever is the LAST one seen on screen
+     * indicates where execution stops:
+     *   GREEN  → are_run() entered (fb_ready OK)
+     *   YELLOW → field_init() returned OK
+     *   RED    → about to call login_run()
+     * If login screen never appears after RED, the bug is inside login_run().
+     * -------------------------------------------------------------------- */
+#define DIAG_PAUSE(col) do { \
+        fb_clear(col); fb_flip(); \
+        uint32_t _dt = timer_get_ticks(); \
+        while (timer_get_ticks() - _dt < 30) {} \
+    } while(0)
+
+    DIAG_PAUSE(0xFF00FF00u); /* GREEN  — checkpoint 1: are_run entered */
 
     field_init(g_screen_w, g_screen_h);
-    are_splash();
+
+    DIAG_PAUSE(0xFFFFFF00u); /* YELLOW — checkpoint 2: field_init returned */
+
+    /* are_splash() skipped for diagnostics — re-enable once GUI is stable */
+    /* are_splash(); */
 
     do {
         g_logout_requested = false;
@@ -670,6 +681,7 @@ void are_run(void)
         wm_init();      /* reset legacy WM state for new session */
         notify_init();  /* clear stale notifications for new session */
 
+        DIAG_PAUSE(0xFFFF0000u); /* RED    — checkpoint 3: about to call login_run */
         login_run();              /* graphical login screen — blocks until authenticated */
         are_launch_core_surfaces();
         are_desktop_fadein();     /* smooth reveal: black veil lifts over ~320 ms */
