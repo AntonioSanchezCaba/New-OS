@@ -641,6 +641,15 @@ void are_run(void)
         return;
     }
 
+    /* Diagnostic: brief bright-green flash confirms are_run() was entered.
+     * Remove once GUI visibility is confirmed working. */
+    {
+        fb_clear(0xFF00FF00u);   /* bright green — unmistakable non-blue colour */
+        fb_flip();
+        uint32_t _t = timer_get_ticks();
+        while (timer_get_ticks() - _t < 50) scheduler_yield(); /* ~500 ms */
+    }
+
     field_init(g_screen_w, g_screen_h);
     are_splash();
 

@@ -444,9 +444,14 @@ void kernel_main(struct multiboot2_info* mb2_info)
             bootanim_step_done();
         }
 
-        /* Wait for the fade-out phase to complete */
-        while (!bootanim_done())
-            scheduler_yield();
+        /* Wait for the fade-out phase to complete — with safety timeout */
+        {
+            uint32_t _anim_deadline = (uint32_t)timer_ticks()
+                                    + BOOTANIM_TOTAL_TICKS + 50;
+            while (!bootanim_done() &&
+                   (uint32_t)timer_ticks() < _anim_deadline)
+                scheduler_yield();
+        }
 
         timer_register_callback(NULL);   /* release the callback slot */
         fb_clear(0xFF000000);            /* clean black for ARE handoff */
