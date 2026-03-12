@@ -530,7 +530,7 @@ static void init_userland(void)
     kinfo("=== " OS_BANNER " — Starting Services ===");
 
     kinfo("Creating init process...");
-    process_t* init = process_create("init", init_process_entry, false);
+    process_t* init = process_create("init", init_process_entry, true);
     if (!init) {
         kpanic("Failed to create init process!");
     }
