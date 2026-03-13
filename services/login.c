@@ -182,6 +182,32 @@ static void draw_login_screen(canvas_t* screen)
     clock_str[8] = '\0';
     draw_string(screen, W - 9 * FONT_W - 8, H - FONT_H - 8,
                 clock_str, th->splash_text, rgba(0,0,0,0));
+
+    /* Mouse debug: show coordinates top-left so we know if IRQ 12 fires */
+    {
+        char mdbg[32];
+        int mx = mouse.x, my = mouse.y;
+        /* itoa-style inline for x */
+        int i = 0;
+        mdbg[i++] = 'M'; mdbg[i++] = ':';
+        if (mx < 0) { mdbg[i++] = '-'; mx = -mx; }
+        int tmp = mx; int digits = 1;
+        while (tmp >= 10) { tmp /= 10; digits++; }
+        for (int d = digits - 1; d >= 0; d--) {
+            mdbg[i + d] = '0' + (char)(mx % 10); mx /= 10;
+        }
+        i += digits;
+        mdbg[i++] = ',';
+        if (my < 0) { mdbg[i++] = '-'; my = -my; }
+        tmp = my; digits = 1;
+        while (tmp >= 10) { tmp /= 10; digits++; }
+        for (int d = digits - 1; d >= 0; d--) {
+            mdbg[i + d] = '0' + (char)(my % 10); my /= 10;
+        }
+        i += digits;
+        mdbg[i] = '\0';
+        draw_string(screen, 4, 4, mdbg, 0xFFFFFFFF, rgba(0,0,0,0));
+    }
 }
 
 static bool try_login(void)
