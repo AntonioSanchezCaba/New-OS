@@ -12,6 +12,7 @@
 #include <drivers/keyboard.h>
 #include <drivers/timer.h>
 #include <drivers/mouse.h>
+#include <drivers/cursor.h>
 #include <scheduler.h>
 #include <kernel/users.h>
 #include <string.h>
@@ -212,22 +213,6 @@ void login_run(void)
     g_blink_tick   = timer_get_ticks();
     g_cursor_vis   = true;
 
-    /* Diagnostic: paint a red-and-white stripe pattern for ~1 second to
-     * confirm that login_run() is running AND draw_rect+fb_flip reach VRAM.
-     * If the user sees alternating stripes, login_run() works; the bug is
-     * purely cosmetic inside draw_login_screen().  Remove once confirmed. */
-    {
-        uint32_t stripe_h = 30;
-        for (uint32_t row = 0; row < (uint32_t)screen.height; row++) {
-            uint32_t col = (row / stripe_h) % 2 ? 0xFFFFFFFFu : 0xFFFF0000u;
-            for (uint32_t x = 0; x < (uint32_t)screen.width; x++)
-                screen.pixels[row * (uint32_t)screen.stride + x] = col;
-        }
-        fb_flip();
-        uint32_t _t = timer_get_ticks();
-        while (timer_get_ticks() - _t < 100) {}  /* hold ~1 second */
-    }
-
     uint8_t prev_kb_char = 0;
     bool    prev_enter   = false;
 
@@ -244,7 +229,6 @@ void login_run(void)
         if (ch && ch != (char)prev_kb_char) {
             field_t* f = &g_fields[g_active_field];
             if (ch == '\t') {
-                /* Tab: switch field */
                 g_active_field = (g_active_field + 1) % FIELD_COUNT;
                 g_error = false;
             } else if (ch == '\n' || ch == '\r') {
@@ -255,7 +239,6 @@ void login_run(void)
                     } else {
                         if (try_login()) return;
                         g_error = true;
-                        /* Clear password field */
                         g_fields[FIELD_PASS].len = 0;
                         g_fields[FIELD_PASS].buf[0] = '\0';
                     }
@@ -278,11 +261,45 @@ void login_run(void)
         }
         prev_kb_char = (uint8_t)ch;
 
-        /* --- Mouse click: field focus or login button --- */
-        /* (Simplified: just use keyboard for login) */
+        /* --- Mouse input --- */
+        {
+            mouse_event_t mev;
+            mouse_get_event(&mev);
+            if (mev.left_clicked) {
+                int mx = mev.x, my = mev.y;
+                int W  = screen.width,  H  = screen.height;
+                int cx = W / 2,         cy = H / 2;
+                int bx = cx - BOX_W / 2;
+                int by = cy - BOX_H / 2;
+                int hdr_h = 40;
+                int fy1   = by + hdr_h + 80;
+                int fx    = cx - FIELD_W / 2;
+                int fy2   = fy1 + FIELD_H + 30;
+                int btn_y = fy2 + FIELD_H + (g_error ? 30 : 16);
+                int btn_x = cx - 60;
 
-        /* Render */
+                if (mx >= fx && mx < fx + FIELD_W &&
+                    my >= fy1 && my < fy1 + FIELD_H) {
+                    g_active_field = FIELD_USER;
+                    g_error = false;
+                } else if (mx >= fx && mx < fx + FIELD_W &&
+                           my >= fy2 && my < fy2 + FIELD_H) {
+                    g_active_field = FIELD_PASS;
+                    g_error = false;
+                } else if (mx >= btn_x && mx < btn_x + 120 &&
+                           my >= btn_y && my < btn_y + 34) {
+                    if (try_login()) return;
+                    g_error = true;
+                    g_fields[FIELD_PASS].len = 0;
+                    g_fields[FIELD_PASS].buf[0] = '\0';
+                }
+            }
+        }
+
+        /* Render: erase old cursor, draw frame, overlay cursor, flip */
+        cursor_erase();
         draw_login_screen(&screen);
+        cursor_render();
         fb_flip();
         scheduler_yield();
     }
