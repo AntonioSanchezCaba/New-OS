@@ -408,7 +408,25 @@ void kernel_main(struct multiboot2_info* mb2_info)
     kinfo("[BOOT] ========================================");
     kinfo("[BOOT] All subsystems initialized. Enabling interrupts.");
     kinfo("[BOOT] ========================================");
+
+    /* DIAG-A: orange screen just before cpu_sti() — visible if Phases 1-8 passed.
+     * Uses a spin-count wait (no timer yet).  ~1-2 s on typical VirtualBox host. */
+    if (fb_ready()) {
+        fb_clear(0xFFFF8000u);   /* orange */
+        fb_flip();
+        for (volatile uint32_t _i = 0; _i < 400000000u; _i++) {}
+    }
+
     cpu_sti();
+
+    /* DIAG-B: cyan screen just after cpu_sti() — timer is now live.
+     * If visible, Phases 1-9 all passed; hang is in DHCP/init_userland below. */
+    if (fb_ready()) {
+        fb_clear(0xFF00FFFFu);   /* cyan */
+        fb_flip();
+        uint32_t _t = timer_get_ticks();
+        while (timer_get_ticks() - _t < 150) {}   /* ~1.5 s */
+    }
 
     /* DHCP requires live timer (IRQ0) and e1000 (IRQ9) — run after cpu_sti() */
     if (e1000_ok == 0) {
