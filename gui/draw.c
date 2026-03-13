@@ -135,6 +135,38 @@ void draw_rect_rounded(canvas_t* c, int x, int y, int w, int h,
     }
 }
 
+/* Rounded rectangle outline */
+void draw_rect_rounded_outline(canvas_t* c, int x, int y, int w, int h,
+                                int radius, int thickness, uint32_t color)
+{
+    if (radius <= 0) { draw_rect_outline(c, x, y, w, h, thickness, color); return; }
+    if (thickness <= 0) return;
+
+    /* Top and bottom edges (between corners) */
+    draw_rect(c, x + radius, y, w - 2*radius, thickness, color);
+    draw_rect(c, x + radius, y + h - thickness, w - 2*radius, thickness, color);
+    /* Left and right edges (between corners) */
+    draw_rect(c, x, y + radius, thickness, h - 2*radius, color);
+    draw_rect(c, x + w - thickness, y + radius, thickness, h - 2*radius, color);
+
+    /* Quarter-circle corners */
+    for (int row = 0; row < radius; row++) {
+        for (int col = 0; col < radius; col++) {
+            int dx = radius - col - 1;
+            int dy = radius - row - 1;
+            int d2 = dx*dx + dy*dy;
+            int r_outer = radius;
+            int r_inner = radius - thickness;
+            if (d2 <= r_outer*r_outer && d2 >= r_inner*r_inner) {
+                _put(c, x + col, y + row, color);
+                _put(c, x + w - 1 - col, y + row, color);
+                _put(c, x + col, y + h - 1 - row, color);
+                _put(c, x + w - 1 - col, y + h - 1 - row, color);
+            }
+        }
+    }
+}
+
 /* =========================================================
  * Lines
  * ========================================================= */

@@ -61,6 +61,10 @@ void draw_circle_filled(canvas_t* c, int cx, int cy, int r, uint32_t color);
 void draw_rect_rounded(canvas_t* c, int x, int y, int w, int h,
                         int radius, uint32_t color);
 
+/* Rounded rectangle outline (border only) */
+void draw_rect_rounded_outline(canvas_t* c, int x, int y, int w, int h,
+                                int radius, int thickness, uint32_t color);
+
 /* Gradient fill (top-to-bottom) */
 void draw_gradient_v(canvas_t* c, int x, int y, int w, int h,
                       uint32_t top_color, uint32_t bottom_color);

@@ -90,13 +90,23 @@ typedef struct {
     uint32_t splash_bar_fill;  /* Progress bar fill */
     uint32_t splash_text;      /* Splash subtitle text */
 
-    uint32_t login_bg;         /* Login screen background */
+    uint32_t login_bg;         /* Login screen background (top) */
+    uint32_t login_bg2;        /* Login screen background (bottom gradient) */
+    uint32_t login_glow;       /* Radial glow accent on background */
     uint32_t login_box;        /* Login panel background */
     uint32_t login_box_border; /* Login panel border */
+    uint32_t login_box_shadow; /* Login panel drop shadow */
     uint32_t login_field_bg;   /* Input field background */
     uint32_t login_field_border;/* Input field border */
+    uint32_t login_field_focus;/* Input field border when focused */
     uint32_t login_text;       /* Login label text */
+    uint32_t login_text_dim;   /* Login placeholder / hint text */
     uint32_t login_cursor;     /* Text cursor in field */
+    uint32_t login_avatar_bg;  /* Avatar circle background */
+    uint32_t login_avatar_ring;/* Avatar decorative ring */
+    uint32_t login_separator;  /* Subtle separator line */
+    uint32_t login_btn_bg;     /* Login button background */
+    uint32_t login_btn_bg2;    /* Login button gradient bottom */
 
     /* Name */
     const char* name;

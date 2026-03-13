@@ -75,13 +75,23 @@ static const theme_t theme_dark = {
     .splash_text       = 0xFF809AB8,
 
     /* Login */
-    .login_bg          = 0xFF0E1828,
-    .login_box         = 0xFF182438,
-    .login_box_border  = 0xFF2A5A9E,
-    .login_field_bg    = 0xFF0E1828,
-    .login_field_border= 0xFF3A6AAE,
-    .login_text        = 0xFFB0C8E8,
+    .login_bg          = 0xFF0A1628,
+    .login_bg2         = 0xFF060E1C,
+    .login_glow        = 0xFF1A3A6E,
+    .login_box         = 0xFF141E30,
+    .login_box_border  = 0xFF2A4A7A,
+    .login_box_shadow  = 0x40000000,
+    .login_field_bg    = 0xFF0C1424,
+    .login_field_border= 0xFF2A3E5E,
+    .login_field_focus = 0xFF3A8AEE,
+    .login_text        = 0xFFD0DEF0,
+    .login_text_dim    = 0xFF506880,
     .login_cursor      = 0xFF60C0FF,
+    .login_avatar_bg   = 0xFF1A2E4E,
+    .login_avatar_ring = 0xFF3A8AEE,
+    .login_separator   = 0xFF1E3050,
+    .login_btn_bg      = 0xFF2A7ADE,
+    .login_btn_bg2     = 0xFF1A5EAE,
 };
 
 /* ---- Light theme palette ---- */
@@ -152,13 +162,23 @@ static const theme_t theme_light = {
     .splash_text       = 0xFFB0C8E0,
 
     /* Login */
-    .login_bg          = 0xFF3A5A8E,
-    .login_box         = 0xFFEEF4FF,
-    .login_box_border  = 0xFF4A78C0,
+    .login_bg          = 0xFF2A4A7E,
+    .login_bg2         = 0xFF1A3060,
+    .login_glow        = 0xFF4A7AC0,
+    .login_box         = 0xFFF0F4FF,
+    .login_box_border  = 0xFFB8CCE8,
+    .login_box_shadow  = 0x30000020,
     .login_field_bg    = 0xFFFFFFFF,
-    .login_field_border= 0xFF3A78C0,
-    .login_text        = 0xFF182848,
+    .login_field_border= 0xFFCCD4E4,
+    .login_field_focus = 0xFF2A72CC,
+    .login_text        = 0xFF1A2848,
+    .login_text_dim    = 0xFF7888A0,
     .login_cursor      = 0xFF0060CC,
+    .login_avatar_bg   = 0xFFE4ECFA,
+    .login_avatar_ring = 0xFF2A72CC,
+    .login_separator   = 0xFFD4DCF0,
+    .login_btn_bg      = 0xFF2A72CC,
+    .login_btn_bg2     = 0xFF1A58AA,
 };
 
 /* ---- Runtime state ---- */
