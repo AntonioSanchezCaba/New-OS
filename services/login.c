@@ -296,11 +296,12 @@ void login_run(void)
             }
         }
 
-        /* Render: erase old cursor, draw frame, overlay cursor, flip */
+        /* Erase cursor from VRAM, draw frame to back-buf,
+         * flip back-buf to VRAM, then draw cursor on top of VRAM */
         cursor_erase();
         draw_login_screen(&screen);
-        cursor_render();
         fb_flip();
+        cursor_render();
         scheduler_yield();
     }
 }
