@@ -428,17 +428,9 @@ void kernel_main(struct multiboot2_info* mb2_info)
         while (timer_get_ticks() - _t < 150) {}   /* ~1.5 s */
     }
 
-    /* DHCP requires live timer (IRQ0) and e1000 (IRQ9) — run after cpu_sti() */
-    if (e1000_ok == 0) {
-        kinfo("Starting DHCP discovery...");
-        if (dhcp_discover() == 0)
-            kinfo("[BOOT] DHCP lease acquired");
-        else
-            klog_warn("DHCP: no lease (static IP or no DHCP server)");
-    }
-
-    /* === Phase 9: Launch userland === */
-    init_userland();
+    /* DHCP + init_userland temporarily skipped for GUI diagnostic.
+     * Re-enable once are_run() / login_run() are confirmed working. */
+    kinfo("[DIAG] Skipping DHCP and init_userland for GUI diagnostic.");
 
     /* === Phase 9b: Boot animation ===
      *
