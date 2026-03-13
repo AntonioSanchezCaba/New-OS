@@ -322,12 +322,12 @@ void login_run(void)
             }
         }
 
-        /* Erase cursor from VRAM, draw frame to back-buf,
-         * flip back-buf to VRAM, then draw cursor on top of VRAM */
+        /* cursor_erase restores back-buf → draw frame → cursor_render
+         * writes sprite into back-buf → fb_flip sends it all to VRAM */
         cursor_erase();
         draw_login_screen(&screen);
-        fb_flip();
         cursor_render();
+        fb_flip();
         scheduler_yield();
     }
 }

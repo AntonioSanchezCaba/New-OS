@@ -404,14 +404,13 @@ cursor_type_t cursor_get_type(void)   { return g_cur.type; }
 bool          cursor_is_visible(void) { return g_cur.visible; }
 
 /* =========================================================
- * cursor_erase() — restore saved background
+ * cursor_erase() — restore saved background into back-buffer
  * ========================================================= */
 void cursor_erase(void)
 {
-    if (!g_cur.bg_saved || !fb.phys_addr) return;
+    if (!g_cur.bg_saved || !fb.back_buf) return;
 
-    uint32_t* fb_ptr = (uint32_t*)fb.phys_addr;
-    int pitch = (int)(fb.pitch / 4);
+    int pitch = (int)fb.width;  /* back_buf stride = width (no padding) */
 
     for (int row = 0; row < g_cur.bg_h; row++) {
         int fy = g_cur.bg_y + row;
@@ -419,18 +418,18 @@ void cursor_erase(void)
         for (int col = 0; col < g_cur.bg_w; col++) {
             int fx = g_cur.bg_x + col;
             if (fx < 0 || fx >= (int)fb.width) continue;
-            fb_ptr[fy * pitch + fx] = g_cur.bg[row * g_cur.bg_w + col];
+            fb.back_buf[fy * pitch + fx] = g_cur.bg[row * g_cur.bg_w + col];
         }
     }
     g_cur.bg_saved = false;
 }
 
 /* =========================================================
- * cursor_render() — save background then blit sprite
+ * cursor_render() — save back-buffer background then blit sprite
  * ========================================================= */
 void cursor_render(void)
 {
-    if (!g_cur.visible || !fb.phys_addr) return;
+    if (!g_cur.visible || !fb.back_buf) return;
     if (g_cur.type == CURSOR_NONE) return;
 
     const sprite_def_t* sp = &g_sprites[g_cur.type];
@@ -451,15 +450,14 @@ void cursor_render(void)
     if (draw_y + draw_h > (int)fb.height) draw_h = (int)fb.height - draw_y;
     if (draw_w <= 0 || draw_h <= 0) return;
 
-    /* Save background */
+    /* Save background from back-buffer */
     g_cur.bg_x = draw_x;
     g_cur.bg_y = draw_y;
     g_cur.bg_w = draw_w;
     g_cur.bg_h = draw_h;
     g_cur.bg_saved = true;
 
-    uint32_t* fb_ptr = (uint32_t*)fb.phys_addr;
-    int pitch = (int)(fb.pitch / 4);
+    int pitch = (int)fb.width;  /* back_buf stride = width (no padding) */
 
     for (int row = 0; row < draw_h; row++) {
         int fy = draw_y + row;
@@ -475,8 +473,8 @@ void cursor_render(void)
             if (sc >= sw) break;
 
             int offset = fy * pitch + fx;
-            /* Save background pixel */
-            g_cur.bg[row * draw_w + col] = fb_ptr[offset];
+            /* Save background pixel from back-buffer */
+            g_cur.bg[row * draw_w + col] = fb.back_buf[offset];
 
             /* Test mask bit (MSB of 16-bit word) */
             uint16_t mbit = (uint16_t)(mask_row >> (15 - sc));
@@ -485,9 +483,9 @@ void cursor_render(void)
             /* Foreground: white sprite with black outline */
             uint16_t fbit = (uint16_t)(bits_row >> (15 - sc));
             if (fbit & 1) {
-                fb_ptr[offset] = 0xFFFFFFFF;  /* White fill */
+                fb.back_buf[offset] = 0xFFFFFFFF;  /* White fill */
             } else {
-                fb_ptr[offset] = 0xFF000000;  /* Black outline */
+                fb.back_buf[offset] = 0xFF000000;  /* Black outline */
             }
         }
     }

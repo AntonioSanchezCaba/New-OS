@@ -620,8 +620,8 @@ static void are_desktop_fadein(void)
                             ACOLOR(0, 0, 0, overlay_a));
 
         cursor_erase();
-        fb_flip();
         cursor_render();
+        fb_flip();
 
         /* ~16 ms per frame */
         uint32_t t0 = timer_get_ticks();
@@ -748,14 +748,11 @@ void are_run(void)
             /* 5e. Toast notifications (top-right corner, above status bar) */
             notify_tick(&screen);
 
-            /* 6. Erase cursor from previous frame's VRAM */
+            /* 6. Erase old cursor from back-buf, render new cursor into
+             * back-buf, then flip — cursor travels with the frame */
             cursor_erase();
-
-            /* 7. Flip back-buffer to VRAM */
-            fb_flip();
-
-            /* 8. Draw cursor on top of freshly-flipped VRAM */
             cursor_render();
+            fb_flip();
 
             scheduler_yield();
         }
