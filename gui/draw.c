@@ -241,17 +241,18 @@ void draw_gradient_v(canvas_t* c, int x, int y, int w, int h,
                      uint32_t color_top, uint32_t color_bottom)
 {
     if (h <= 0) return;
-    uint32_t r0 = (color_top  >> 16) & 0xFF;
-    uint32_t g0 = (color_top  >>  8) & 0xFF;
-    uint32_t b0 =  color_top         & 0xFF;
-    uint32_t r1 = (color_bottom >> 16) & 0xFF;
-    uint32_t g1 = (color_bottom >>  8) & 0xFF;
-    uint32_t b1 =  color_bottom        & 0xFF;
+    /* Use signed arithmetic so colors can decrease without wrapping */
+    int r0 = (int)((color_top  >> 16) & 0xFF);
+    int g0 = (int)((color_top  >>  8) & 0xFF);
+    int b0 = (int)( color_top         & 0xFF);
+    int r1 = (int)((color_bottom >> 16) & 0xFF);
+    int g1 = (int)((color_bottom >>  8) & 0xFF);
+    int b1 = (int)( color_bottom        & 0xFF);
 
     for (int row = 0; row < h; row++) {
-        uint32_t r = r0 + (r1 - r0) * row / h;
-        uint32_t g = g0 + (g1 - g0) * row / h;
-        uint32_t b = b0 + (b1 - b0) * row / h;
+        int r = r0 + (r1 - r0) * row / h;
+        int g = g0 + (g1 - g0) * row / h;
+        int b = b0 + (b1 - b0) * row / h;
         draw_rect(c, x, y + row, w, 1, rgb((uint8_t)r,(uint8_t)g,(uint8_t)b));
     }
 }
