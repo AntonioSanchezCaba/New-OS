@@ -136,7 +136,19 @@ typedef struct { int x, y, w, h; } hitbox_t;
 static hitbox_t g_hit_shutdown;
 static hitbox_t g_hit_restart;
 static hitbox_t g_hit_sleep;
-static hitbox_t g_hit_eye;    /* password show/hide toggle */
+static hitbox_t g_hit_eye;          /* password show/hide toggle */
+static hitbox_t g_hit_accessibility;
+static hitbox_t g_hit_network;
+static hitbox_t g_hit_keyboard;
+
+/* Popup notification state */
+#define POPUP_NONE       0
+#define POPUP_NETWORK    1
+#define POPUP_KEYBOARD   2
+#define POPUP_ACCESS     3
+static int      g_popup      = POPUP_NONE;
+static uint32_t g_popup_tick = 0;     /* when the popup appeared */
+#define POPUP_DURATION   (TIMER_FREQ * 3)  /* 3 seconds */
 
 /* ── Timezone setup wizard state ─────────────────────────────────────── */
 #define TZ_WIZARD_NONE    0
@@ -851,39 +863,65 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
                         rgba(0x40, 0xA0, 0xE0, 0x60));
     }
 
-    /* ── Caps Lock up-arrow icon (left zone) ─────────────────────── */
+    /* ── Caps Lock indicator (left zone) ────────────────────────── */
     int icon_cx = x + 20;
     int icon_cy = y + h / 2;
-    uint32_t icon_col = focused ? rgba(0x50, 0x90, 0xC0, 0xC0)
-                                : rgba(0x40, 0x60, 0x80, 0x80);
-    draw_capslock_icon(scr, icon_cx, icon_cy, icon_col);
+
+    if (kbd_state.caps_lock) {
+        /* Caps Lock is ON: draw bright warning icon */
+        uint32_t warn_col = rgba(0xFF, 0xA0, 0x30, 0xFF); /* orange/amber */
+        draw_capslock_icon(scr, icon_cx, icon_cy, warn_col);
+    } else {
+        /* Caps Lock is OFF: draw dim subtle icon */
+        uint32_t dim_col = rgba(0x30, 0x48, 0x60, 0x50);
+        draw_capslock_icon(scr, icon_cx, icon_cy, dim_col);
+    }
 
     /* ── Vertical separator ──────────────────────────────────────── */
     int sep_x = x + 38;
     draw_rect_alpha(scr, sep_x, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x40));
 
-    /* ── Eye toggle icon (right side of field, centered) ────── */
+    /* ── Eye toggle icon (right side, properly centered in zone) ── */
     {
-        int eye_zone = 36;  /* clickable zone width */
-        int eye_cx = x + w - eye_zone / 2;
+        int eye_zone = 32;  /* clickable zone width */
+        int eye_cx = x + w - eye_zone / 2 - 4; /* center of eye zone */
         int eye_cy = y + h / 2;
-        uint32_t c_on  = C_FIELD_FOCUS;              /* active blue */
-        uint32_t c_off = rgba(0x60, 0x80, 0xA0, 0xB0); /* dimmer */
+        uint32_t c_on  = rgba(0x50, 0xC0, 0xFF, 0xFF);  /* bright cyan */
+        uint32_t c_off = rgba(0x55, 0x75, 0x95, 0xA0);  /* subtle gray */
         uint32_t eye_col = g_show_password ? c_on : c_off;
 
-        /* Draw almond-shaped eye using parametric curves.
-         * Upper lid:  y = -A * (1 - (x/R)^2)
-         * Lower lid:  y = +A * (1 - (x/R)^2)
-         * with R=10 (half-width) and A=5 (half-height) */
-        int R = 10, A = 5;
-        for (int dx = -R; dx <= R; dx++) {
-            /* Quadratic lid curves */
-            int frac = (R * R - dx * dx);  /* 0..R^2 */
-            int dy_lid = A * frac / (R * R);
-            if (dy_lid < 1 && (dx > -R && dx < R)) dy_lid = 1;
+        /*
+         * Draw a clean eye icon:
+         *  - Almond shape using two quadratic arcs
+         *  - Radius 8 half-width, 4 half-height
+         *  - Filled iris circle + dark pupil
+         *  - Slash line when hidden
+         */
+        int R = 8, A = 4;
 
-            /* Top lid pixel */
+        /* Fill the interior of the eye lightly when active */
+        if (g_show_password) {
+            for (int dx = -(R-1); dx <= (R-1); dx++) {
+                int frac = R * R - dx * dx;
+                int dy_lid = A * frac / (R * R);
+                for (int dy = -dy_lid + 1; dy < dy_lid; dy++) {
+                    int px_x = eye_cx + dx, py_y = eye_cy + dy;
+                    if ((unsigned)px_x < (unsigned)scr->width &&
+                        (unsigned)py_y < (unsigned)scr->height)
+                        scr->pixels[py_y * scr->stride + px_x] =
+                            fb_blend(scr->pixels[py_y * scr->stride + px_x],
+                                     rgba(0x30, 0x60, 0x90, 0x30));
+                }
+            }
+        }
+
+        /* Lid outlines */
+        for (int dx = -R; dx <= R; dx++) {
+            int frac = R * R - dx * dx;
+            int dy_lid = A * frac / (R * R);
+            if (dy_lid < 1 && dx > -R && dx < R) dy_lid = 1;
+
             int px_x = eye_cx + dx;
             int py_top = eye_cy - dy_lid;
             int py_bot = eye_cy + dy_lid;
@@ -895,20 +933,18 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
             }
         }
 
-        /* Iris: filled circle radius 3 */
+        /* Iris: filled circle */
         draw_circle_filled(scr, eye_cx, eye_cy, 3, eye_col);
-        /* Pupil: dark dot */
-        draw_circle_filled(scr, eye_cx, eye_cy, 1,
-                           rgba(0x10, 0x18, 0x28, 0xFF));
-        /* Iris ring */
-        draw_circle(scr, eye_cx, eye_cy, 3, eye_col);
+        /* Pupil: dark center */
+        px_set(scr, eye_cx, eye_cy, rgba(0x08, 0x10, 0x1C, 0xFF));
+        /* Specular highlight on iris */
+        px_set(scr, eye_cx - 1, eye_cy - 1, rgba(0xA0, 0xD0, 0xFF, 0x80));
 
-        /* Diagonal slash when hidden */
+        /* Diagonal slash when password is hidden */
         if (!g_show_password) {
-            for (int i = -8; i <= 8; i++) {
+            for (int i = -7; i <= 7; i++) {
                 int sx = eye_cx + i;
-                int sy = eye_cy - (i * 6) / 8;
-                /* Draw 2px wide for visibility */
+                int sy = eye_cy + (i * 5) / 7;
                 for (int t = 0; t <= 1; t++) {
                     int px_sx = sx + t;
                     if ((unsigned)px_sx < (unsigned)scr->width &&
@@ -918,11 +954,11 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
             }
         }
 
-        /* Store hitbox */
-        g_hit_eye = (hitbox_t){ eye_cx - eye_zone / 2, y, eye_zone, h };
+        /* Store hitbox (entire right zone of field) */
+        g_hit_eye = (hitbox_t){ x + w - eye_zone - 4, y, eye_zone + 4, h };
     }
 
-    /* ── Vertical separator before eye icon ──────────────────── */
+    /* ── Vertical separator before eye zone ──────────────────── */
     draw_rect_alpha(scr, x + w - 36, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x30));
 
@@ -1662,20 +1698,20 @@ static void draw_login_screen(canvas_t* scr)
 
         /* Accessibility icon: (i) in a circle */
         draw_circle(scr, cx_pos + 6, ry + 7, 6, C_FOOTER);
-        /* letter i: dot + vertical bar */
         px_set(scr, cx_pos + 6, ry + 4, C_FOOTER);
         draw_vline(scr, cx_pos + 6, ry + 6, 5, C_FOOTER);
         cx_pos += 16;
 
+        tw = draw_string_width("Accessibility");
         draw_string(scr, cx_pos, ry + 1, "Accessibility",
                     C_FOOTER_HI, rgba(0,0,0,0));
-        cx_pos += draw_string_width("Accessibility") + 12;
+        g_hit_accessibility = (hitbox_t){ cx_pos - 16, ry, tw + 16, 16 };
+        cx_pos += tw + 12;
 
         /* Network/WiFi mini-icon */
         {
             int wcx = cx_pos + 6, wcy = ry + 8;
             draw_circle_filled(scr, wcx, wcy + 3, 1, C_FOOTER);
-            /* Two small arcs */
             for (int dx = -4; dx <= 4; dx++) {
                 int d2 = 16 - dx * dx;
                 if (d2 < 0) continue;
@@ -1693,8 +1729,10 @@ static void draw_login_screen(canvas_t* scr)
         }
         cx_pos += 16;
 
+        tw = draw_string_width("Network");
         draw_string(scr, cx_pos, ry + 1, "Network",
                     C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_network = (hitbox_t){ cx_pos - 16, ry, tw + 16, 16 };
     }
 
     /* --- Row 3: Keyboard layout --- */
@@ -1703,15 +1741,15 @@ static void draw_login_screen(canvas_t* scr)
 
         /* Keyboard icon (small rectangle with dots) */
         draw_rect_rounded_outline(scr, fl, ry + 1, 14, 10, 2, 1, C_FOOTER);
-        /* Key dots inside */
         draw_rect(scr, fl + 3, ry + 3, 2, 2, C_FOOTER);
         draw_rect(scr, fl + 6, ry + 3, 2, 2, C_FOOTER);
         draw_rect(scr, fl + 9, ry + 3, 2, 2, C_FOOTER);
-        /* Space bar */
         draw_hline(scr, fl + 4, ry + 7, 6, C_FOOTER);
 
+        int tw = draw_string_width("Keyboard: EN-US");
         draw_string(scr, fl + 18, ry, "Keyboard: EN-US",
                     C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_keyboard = (hitbox_t){ fl, ry, tw + 18, 16 };
     }
 
     /* ── Decorative sparkles ────────────────────────────────────────── */
@@ -1733,6 +1771,29 @@ static void draw_login_screen(canvas_t* scr)
     int uw = draw_string_width(timestr);
     draw_string(scr, W - uw - 20, H - 28, timestr,
                 C_INFO, rgba(0,0,0,0));
+
+    /* ── Popup notification (if active) ─────────────────────────────── */
+    if (g_popup != POPUP_NONE) {
+        uint32_t elapsed = timer_get_ticks() - g_popup_tick;
+        if (elapsed < POPUP_DURATION) {
+            const char* msg = "";
+            if (g_popup == POPUP_NETWORK)   msg = "Network: Connected (Ethernet)";
+            if (g_popup == POPUP_KEYBOARD)  msg = "Keyboard Layout: EN-US (QWERTY)";
+            if (g_popup == POPUP_ACCESS)    msg = "Accessibility: No options configured";
+
+            int pw = draw_string_width(msg) + 40;
+            int ph = 30;
+            int ppx = (W - pw) / 2;
+            int ppy = H - 60;
+            /* Background pill */
+            draw_rect_alpha(scr, ppx, ppy, pw, ph, rgba(0x10, 0x20, 0x38, 0xE0));
+            draw_rect_rounded_outline(scr, ppx, ppy, pw, ph, 6, 1,
+                                       rgba(0x40, 0x80, 0xC0, 0x80));
+            draw_string(scr, ppx + 20, ppy + 8, msg, C_NAME, rgba(0,0,0,0));
+        } else {
+            g_popup = POPUP_NONE;
+        }
+    }
 
     /* ── Timezone wizard overlay (if active) ─────────────────────────── */
     if (g_tz_wizard >= TZ_WIZARD_CLOCK && g_tz_wizard <= TZ_WIZARD_CITY)
@@ -1891,6 +1952,80 @@ void login_run(void)
         {
             mouse_event_t mev;
             mouse_get_event(&mev);
+
+            /* --- Timezone wizard mouse handling --- */
+            if (mev.left_clicked && g_tz_wizard >= TZ_WIZARD_CLOCK &&
+                g_tz_wizard <= TZ_WIZARD_CITY) {
+                int mx = mev.x, my = mev.y;
+                int W = screen.width, H = screen.height;
+
+                if (g_tz_wizard == TZ_WIZARD_CLOCK) {
+                    int wiz_h = 220;
+                    int wx = (W - WIZ_W) / 2;
+                    int wy = (H - wiz_h) / 2;
+                    int ly = wy + WIZ_PAD + 56;
+                    int lx = wx + WIZ_PAD;
+                    int lw = WIZ_W - 2 * WIZ_PAD;
+                    for (int i = 0; i < 2; i++) {
+                        int iy = ly + i * 36;
+                        if (mx >= lx && mx < lx + lw &&
+                            my >= iy && my < iy + 28) {
+                            g_tz_clock_sel = i;
+                            /* Double-click: also confirm */
+                            rtc_set_utc_hwclock(g_tz_clock_sel == 1);
+                            g_tz_wizard = TZ_WIZARD_REGION;
+                            g_tz_region_sel = 0;
+                            break;
+                        }
+                    }
+                } else {
+                    /* Region or City list */
+                    int wx = (W - WIZ_W) / 2;
+                    int wy = (H - WIZ_H) / 2;
+                    int list_y = wy + WIZ_PAD + 50;
+                    int list_x = wx + WIZ_PAD;
+                    int list_w = WIZ_W - 2 * WIZ_PAD;
+
+                    int count, *sel_ptr;
+                    if (g_tz_wizard == TZ_WIZARD_REGION) {
+                        count = TZ_REGION_COUNT;
+                        sel_ptr = &g_tz_region_sel;
+                    } else {
+                        count = tz_regions[g_tz_region_sel].count;
+                        sel_ptr = &g_tz_city_sel;
+                    }
+
+                    int max_vis = (WIZ_H - WIZ_PAD - 50 - WIZ_PAD) / WIZ_ITEM_H;
+                    int scroll = 0;
+                    if (*sel_ptr >= max_vis) scroll = *sel_ptr - max_vis + 1;
+                    if (scroll > count - max_vis) scroll = count - max_vis;
+                    if (scroll < 0) scroll = 0;
+
+                    for (int i = scroll; i < count && (i - scroll) < max_vis; i++) {
+                        int iy = list_y + (i - scroll) * WIZ_ITEM_H;
+                        if (mx >= list_x && mx < list_x + list_w &&
+                            my >= iy && my < iy + WIZ_ITEM_H) {
+                            if (*sel_ptr == i) {
+                                /* Already selected: confirm (like double click) */
+                                if (g_tz_wizard == TZ_WIZARD_REGION) {
+                                    g_tz_wizard = TZ_WIZARD_CITY;
+                                    g_tz_city_sel = 0;
+                                } else {
+                                    int16_t offset = tz_regions[g_tz_region_sel]
+                                                        .cities[g_tz_city_sel].offset;
+                                    rtc_set_tz_offset(offset);
+                                    rtc_set_tz_configured(true);
+                                    g_tz_wizard = TZ_WIZARD_NONE;
+                                }
+                            } else {
+                                *sel_ptr = i;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (mev.left_clicked && g_tz_wizard == TZ_WIZARD_NONE) {
                 int mx = mev.x, my = mev.y;
 
@@ -1921,6 +2056,24 @@ void login_run(void)
                 /* Password show/hide eye toggle */
                 if (hitbox_test(&g_hit_eye, mx, my)) {
                     g_show_password = !g_show_password;
+                }
+
+                /* Footer: Network info popup */
+                if (hitbox_test(&g_hit_network, mx, my)) {
+                    g_popup = POPUP_NETWORK;
+                    g_popup_tick = timer_get_ticks();
+                }
+
+                /* Footer: Accessibility info popup */
+                if (hitbox_test(&g_hit_accessibility, mx, my)) {
+                    g_popup = POPUP_ACCESS;
+                    g_popup_tick = timer_get_ticks();
+                }
+
+                /* Footer: Keyboard info popup */
+                if (hitbox_test(&g_hit_keyboard, mx, my)) {
+                    g_popup = POPUP_KEYBOARD;
+                    g_popup_tick = timer_get_ticks();
                 }
             }
         }
