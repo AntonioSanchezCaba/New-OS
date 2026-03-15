@@ -152,6 +152,25 @@ static int      g_popup      = POPUP_NONE;
 static uint32_t g_popup_tick = 0;     /* when the popup appeared */
 #define POPUP_DURATION   (TIMER_FREQ * 3)  /* 3 seconds */
 
+/* Network panel state */
+#define NET_PANEL_NONE    0
+#define NET_PANEL_OPEN    1
+static int  g_net_panel      = NET_PANEL_NONE;
+static int  g_net_sel        = 0;    /* selected network index */
+
+/* Simulated WiFi networks visible in the area */
+typedef struct { const char* ssid; int signal; bool secured; } wifi_net_t;
+static const wifi_net_t g_wifi_list[] = {
+    { "AetherOS-5G",        90, true  },
+    { "Home_Network",       75, true  },
+    { "CoffeeShop_Free",    60, false },
+    { "Neighbor_WiFi",      45, true  },
+    { "IoT-Devices",        35, true  },
+    { "Guest_Network",      25, false },
+};
+#define WIFI_COUNT 6
+static int  g_wifi_connected = -1;   /* index of connected wifi, -1 = none */
+
 /* Switch User / Create User panel state */
 #define SWITCH_NONE     0
 #define SWITCH_LIST     1     /* showing user list */
@@ -1452,6 +1471,120 @@ static void draw_tz_wizard(canvas_t* scr)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+ * NETWORK / WIFI SELECTION PANEL
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+#define NET_W    340
+#define NET_H    320
+#define NET_PAD   20
+
+static void draw_net_panel(canvas_t* scr)
+{
+    int W = scr->width, H = scr->height;
+    int nx = (W - NET_W) / 2;
+    int ny = (H - NET_H) / 2;
+
+    /* Dim background */
+    draw_rect_alpha(scr, 0, 0, W, H, rgba(0, 0, 0, 0x80));
+
+    /* Panel card */
+    draw_glass_card(scr, nx, ny, NET_W, NET_H, 16);
+
+    /* Title */
+    const char* title = "Network";
+    int tw = draw_string_width(title);
+    draw_string(scr, nx + (NET_W - tw) / 2, ny + NET_PAD,
+                title, C_NAME, rgba(0,0,0,0));
+
+    /* Ethernet status */
+    int ey = ny + NET_PAD + 24;
+    bool eth_up = e1000_link_up();
+    const char* eth_lbl = eth_up ? "Ethernet: Connected" : "Ethernet: Disconnected";
+    uint32_t eth_col = eth_up ? rgba(0x40, 0xE0, 0x80, 0xFF) : C_ERROR_COL;
+    /* Small circle indicator */
+    draw_circle_filled(scr, nx + NET_PAD + 5, ey + 6, 4, eth_col);
+    draw_string(scr, nx + NET_PAD + 16, ey, eth_lbl, eth_col, rgba(0,0,0,0));
+
+    /* Separator */
+    int sep_y = ey + 20;
+    draw_rect_alpha(scr, nx + NET_PAD, sep_y,
+                    NET_W - 2 * NET_PAD, 1, rgba(0x40, 0x60, 0x80, 0x30));
+
+    /* WiFi label */
+    draw_string(scr, nx + NET_PAD, sep_y + 8, "Wi-Fi Networks",
+                C_SUBTEXT, rgba(0,0,0,0));
+
+    /* WiFi list */
+    int list_y = sep_y + 26;
+    int list_x = nx + NET_PAD;
+    int list_w = NET_W - 2 * NET_PAD;
+
+    for (int i = 0; i < WIFI_COUNT; i++) {
+        int iy = list_y + i * 30;
+        bool sel = (i == g_net_sel);
+        bool connected = (i == g_wifi_connected);
+
+        if (sel) {
+            draw_rect_alpha(scr, list_x, iy, list_w, 26,
+                            rgba(0x30, 0x70, 0xB0, 0x60));
+            draw_rect_rounded_outline(scr, list_x, iy, list_w, 26,
+                                       4, 1, C_FIELD_FOCUS);
+        }
+
+        /* Signal strength bars (3 bars) */
+        int bx = list_x + 6;
+        int by = iy + 18;
+        for (int b = 0; b < 3; b++) {
+            int bh = 6 + b * 4;
+            uint32_t bar_col;
+            int threshold = (b + 1) * 30;
+            if (g_wifi_list[i].signal >= threshold)
+                bar_col = sel ? C_NAME : C_TEXT;
+            else
+                bar_col = rgba(0x30, 0x48, 0x60, 0x50);
+            draw_rect(scr, bx + b * 5, by - bh, 3, bh, bar_col);
+        }
+
+        /* SSID name */
+        draw_string(scr, list_x + 24, iy + 5, g_wifi_list[i].ssid,
+                    sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
+
+        /* Lock icon if secured */
+        if (g_wifi_list[i].secured) {
+            int lx = list_x + list_w - 24;
+            int ly = iy + 5;
+            /* Simple lock: small rect + arc on top */
+            draw_rect(scr, lx, ly + 5, 10, 7, sel ? C_INFO : C_TEXT_DIM);
+            draw_rect(scr, lx + 2, ly + 7, 6, 3, rgba(0x08, 0x10, 0x1C, 0xFF));
+            /* Arc (shackle) */
+            for (int dx = -3; dx <= 3; dx++) {
+                int d2 = 9 - dx * dx;
+                if (d2 < 0) continue;
+                int dy = isqrt(d2);
+                px_blend(scr, lx + 5 + dx, ly + 5 - dy, sel ? C_INFO : C_TEXT_DIM);
+                if (dy > 1)
+                    px_blend(scr, lx + 5 + dx, ly + 6 - dy, sel ? C_INFO : C_TEXT_DIM);
+            }
+        }
+
+        /* "Connected" label */
+        if (connected) {
+            const char* cl = "Connected";
+            int cw = draw_string_width(cl);
+            int cx_pos = list_x + list_w - cw - (g_wifi_list[i].secured ? 30 : 6);
+            draw_string(scr, cx_pos, iy + 5, cl,
+                        rgba(0x40, 0xE0, 0x80, 0xFF), rgba(0,0,0,0));
+        }
+    }
+
+    /* Hint */
+    const char* hint = "Click or Enter to connect. Esc to close.";
+    int hw = draw_string_width(hint);
+    draw_string(scr, nx + (NET_W - hw) / 2, ny + NET_H - NET_PAD - 10,
+                hint, C_INFO, rgba(0,0,0,0));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
  * MAIN LOGIN SCREEN RENDERER
  * ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1525,11 +1658,11 @@ static void draw_login_screen(canvas_t* scr)
     draw_status_indicators(scr, left_margin, icon_y, C_INFO);
 
     /* ── RIGHT SIDE: Login card (centered on the right half) ──────── */
-    int right_half_cx = (W / 2 + W) / 2;    /* center of right half */
+    int right_half_cx = W * 2 / 3;           /* center card at 2/3 screen */
     int card_x = right_half_cx - CARD_W / 2;
     int card_y = H * 18 / 100;
-    if (card_x < W / 2) card_x = W / 2;
-    if (card_x + CARD_W > W - 20) card_x = W - CARD_W - 20;
+    if (card_x + CARD_W > W - 40) card_x = W - CARD_W - 40;
+    if (card_x < W * 45 / 100) card_x = W * 45 / 100;
 
     draw_glass_card(scr, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS);
 
@@ -1916,6 +2049,10 @@ static void draw_login_screen(canvas_t* scr)
                         cbt, C_NAME, rgba(0,0,0,0));
         }
     }
+
+    /* ── Network panel overlay (if active) ───────────────────────────── */
+    if (g_net_panel == NET_PANEL_OPEN)
+        draw_net_panel(scr);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2036,6 +2173,22 @@ void login_run(void)
                         rtc_set_tz_configured(true);
                         g_tz_wizard = TZ_WIZARD_NONE;
                     }
+                }
+
+            } else if (g_net_panel == NET_PANEL_OPEN) {
+                /* --- Network panel keyboard handling --- */
+                if (kc == KEY_UP_ARROW) {
+                    if (g_net_sel > 0) g_net_sel--;
+                } else if (kc == KEY_DOWN_ARROW) {
+                    if (g_net_sel < WIFI_COUNT - 1) g_net_sel++;
+                } else if (ch == '\n' || ch == '\r') {
+                    /* Toggle connection */
+                    if (g_wifi_connected == g_net_sel)
+                        g_wifi_connected = -1;
+                    else
+                        g_wifi_connected = g_net_sel;
+                } else if (kc == 0x1B) {
+                    g_net_panel = NET_PANEL_NONE;
                 }
 
             } else if (g_switch_mode == SWITCH_LIST) {
@@ -2237,6 +2390,53 @@ void login_run(void)
                 }
             }
 
+            /* --- Network panel mouse handling --- */
+            if (left_edge && g_net_panel == NET_PANEL_OPEN) {
+                int mx = mev.x, my = mev.y;
+                int W = screen.width, H = screen.height;
+                int nx = (W - NET_W) / 2;
+                int ny = (H - NET_H) / 2;
+
+                if (mx < nx || mx > nx + NET_W ||
+                    my < ny || my > ny + NET_H) {
+                    g_net_panel = NET_PANEL_NONE;
+                } else {
+                    /* WiFi list area */
+                    int sep_y = ny + NET_PAD + 24 + 20;
+                    int list_y = sep_y + 26;
+                    int list_x = nx + NET_PAD;
+                    int list_w = NET_W - 2 * NET_PAD;
+
+                    for (int i = 0; i < WIFI_COUNT; i++) {
+                        int iy = list_y + i * 30;
+                        if (mx >= list_x && mx < list_x + list_w &&
+                            my >= iy && my < iy + 26) {
+                            if (g_net_sel == i) {
+                                /* Toggle connection */
+                                if (g_wifi_connected == i)
+                                    g_wifi_connected = -1;
+                                else
+                                    g_wifi_connected = i;
+                            } else {
+                                g_net_sel = i;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            /* Scroll wheel in network panel */
+            if (mouse.scroll != 0 && g_net_panel == NET_PANEL_OPEN) {
+                int8_t sw = mouse.scroll;
+                mouse.scroll = 0;
+                if (sw < 0) {
+                    if (g_net_sel < WIFI_COUNT - 1) g_net_sel++;
+                } else {
+                    if (g_net_sel > 0) g_net_sel--;
+                }
+            }
+
             /* --- Switch User overlay mouse handling --- */
             if (left_edge && g_switch_mode == SWITCH_LIST) {
                 int mx = mev.x, my = mev.y;
@@ -2334,7 +2534,8 @@ void login_run(void)
             }
 
             if (left_edge && g_tz_wizard == TZ_WIZARD_NONE &&
-                g_switch_mode == SWITCH_NONE) {
+                g_switch_mode == SWITCH_NONE &&
+                g_net_panel == NET_PANEL_NONE) {
                 int mx = mev.x, my = mev.y;
 
                 /* Authenticate button */
@@ -2366,10 +2567,10 @@ void login_run(void)
                     g_show_password = !g_show_password;
                 }
 
-                /* Footer: Network info popup */
+                /* Footer: Network panel */
                 if (hitbox_test(&g_hit_network, mx, my)) {
-                    g_popup = POPUP_NETWORK;
-                    g_popup_tick = timer_get_ticks();
+                    g_net_panel = NET_PANEL_OPEN;
+                    g_net_sel = 0;
                 }
 
                 /* Footer: Accessibility info popup */
