@@ -24,6 +24,18 @@
 #define RTC_STATUS_A 0x0A
 #define RTC_STATUS_B 0x0B
 
+/*
+ * CMOS NVRAM persistence for timezone settings.
+ * We use three otherwise-unused CMOS registers:
+ *   0x38: magic byte (0xAE = "AEtherOS timezone set")
+ *   0x39: timezone offset high byte  (int16_t big-endian)
+ *   0x3A: timezone offset low byte
+ */
+#define CMOS_TZ_MAGIC   0x38
+#define CMOS_TZ_HI      0x39
+#define CMOS_TZ_LO      0x3A
+#define TZ_MAGIC_VALUE  0xAE
+
 /* State */
 static int16_t g_tz_offset = 0;      /* minutes from UTC */
 static bool    g_tz_configured = false;
@@ -34,6 +46,33 @@ static uint8_t cmos_read(uint8_t reg)
     outb(CMOS_ADDR, reg);
     io_wait();
     return inb(CMOS_DATA);
+}
+
+/* Write a single CMOS register */
+static void cmos_write(uint8_t reg, uint8_t val)
+{
+    outb(CMOS_ADDR, reg);
+    io_wait();
+    outb(CMOS_DATA, val);
+}
+
+/* Save timezone offset to CMOS NVRAM (persists across reboots) */
+static void cmos_save_tz(int16_t offset)
+{
+    cmos_write(CMOS_TZ_MAGIC, TZ_MAGIC_VALUE);
+    cmos_write(CMOS_TZ_HI, (uint8_t)((uint16_t)offset >> 8));
+    cmos_write(CMOS_TZ_LO, (uint8_t)((uint16_t)offset & 0xFF));
+}
+
+/* Load timezone offset from CMOS NVRAM. Returns true if valid. */
+static bool cmos_load_tz(int16_t* offset)
+{
+    if (cmos_read(CMOS_TZ_MAGIC) != TZ_MAGIC_VALUE)
+        return false;
+    uint8_t hi = cmos_read(CMOS_TZ_HI);
+    uint8_t lo = cmos_read(CMOS_TZ_LO);
+    *offset = (int16_t)((uint16_t)hi << 8 | lo);
+    return true;
 }
 
 /* Check if RTC update is in progress */
@@ -75,8 +114,15 @@ static uint8_t calc_weekday(uint16_t y, uint8_t m, uint8_t d)
 
 void rtc_init(void)
 {
-    g_tz_offset = 0;
-    g_tz_configured = false;
+    /* Try to restore timezone from CMOS NVRAM */
+    int16_t saved_offset;
+    if (cmos_load_tz(&saved_offset)) {
+        g_tz_offset = saved_offset;
+        g_tz_configured = true;
+    } else {
+        g_tz_offset = 0;
+        g_tz_configured = false;
+    }
 }
 
 void rtc_get_time(rtc_time_t* t)
@@ -179,6 +225,7 @@ void rtc_get_time(rtc_time_t* t)
 void rtc_set_tz_offset(int16_t offset_minutes)
 {
     g_tz_offset = offset_minutes;
+    cmos_save_tz(offset_minutes);
 }
 
 int16_t rtc_get_tz_offset(void)

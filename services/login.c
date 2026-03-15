@@ -128,11 +128,15 @@ static bool     g_cursor_vis = true;
 static int g_field_x, g_field_y;
 static int g_btn_x, g_btn_y;
 
+/* Password visibility toggle */
+static bool g_show_password = false;
+
 /* Footer button hit-test rectangles */
 typedef struct { int x, y, w, h; } hitbox_t;
 static hitbox_t g_hit_shutdown;
 static hitbox_t g_hit_restart;
 static hitbox_t g_hit_sleep;
+static hitbox_t g_hit_eye;    /* password show/hide toggle */
 
 /* ── Timezone setup wizard state ─────────────────────────────────────── */
 #define TZ_WIZARD_NONE    0
@@ -159,10 +163,27 @@ static const tz_city_t tz_americas[] = {
     { "Los Angeles (PST)",  -480 },
     { "Anchorage (AKST)",   -540 },
     { "Honolulu (HST)",     -600 },
-    { "Sao Paulo (BRT)",    -180 },
-    { "Buenos Aires (ART)", -180 },
+    { "Santo Domingo (AST)",-240 },
+    { "San Juan, PR (AST)", -240 },
+    { "Havana (CST)",       -300 },
+    { "Kingston (EST)",     -300 },
+    { "Port-au-Prince (EST)",-300 },
+    { "Panama City (EST)",  -300 },
+    { "San Jose, CR (CST)", -360 },
+    { "Guatemala City",     -360 },
+    { "Tegucigalpa (CST)",  -360 },
+    { "Managua (CST)",      -360 },
+    { "San Salvador (CST)", -360 },
     { "Mexico City (CST)",  -360 },
     { "Bogota (COT)",       -300 },
+    { "Lima (PET)",         -300 },
+    { "Caracas (VET)",      -240 },
+    { "Santiago (CLT)",     -240 },
+    { "Sao Paulo (BRT)",    -180 },
+    { "Buenos Aires (ART)", -180 },
+    { "Montevideo (UYT)",   -180 },
+    { "Toronto (EST)",      -300 },
+    { "Vancouver (PST)",    -480 },
 };
 
 static const tz_city_t tz_europe[] = {
@@ -171,11 +192,18 @@ static const tz_city_t tz_europe[] = {
     { "Berlin (CET)",        +60 },
     { "Madrid (CET)",        +60 },
     { "Rome (CET)",          +60 },
+    { "Lisbon (WET)",          0 },
     { "Moscow (MSK)",       +180 },
     { "Istanbul (TRT)",     +180 },
     { "Athens (EET)",       +120 },
+    { "Helsinki (EET)",     +120 },
+    { "Bucharest (EET)",    +120 },
     { "Warsaw (CET)",        +60 },
     { "Amsterdam (CET)",     +60 },
+    { "Zurich (CET)",        +60 },
+    { "Stockholm (CET)",     +60 },
+    { "Dublin (GMT)",          0 },
+    { "Kyiv (EET)",         +120 },
 };
 
 static const tz_city_t tz_asia[] = {
@@ -197,14 +225,23 @@ static const tz_city_t tz_africa[] = {
     { "Nairobi (EAT)",      +180 },
     { "Johannesburg (SAST)",+120 },
     { "Casablanca (WET)",      0 },
+    { "Accra (GMT)",           0 },
+    { "Addis Ababa (EAT)",  +180 },
+    { "Dar es Salaam (EAT)",+180 },
+    { "Kinshasa (WAT)",      +60 },
+    { "Tunis (CET)",         +60 },
+    { "Algiers (CET)",       +60 },
 };
 
 static const tz_city_t tz_oceania[] = {
     { "Sydney (AEST)",      +600 },
     { "Melbourne (AEST)",   +600 },
+    { "Brisbane (AEST)",    +600 },
     { "Auckland (NZST)",    +720 },
     { "Perth (AWST)",       +480 },
     { "Fiji (FJT)",         +720 },
+    { "Adelaide (ACST)",    +570 },
+    { "Guam (ChST)",        +600 },
 };
 
 static const tz_city_t tz_utc[] = {
@@ -237,11 +274,11 @@ static const tz_city_t tz_utc[] = {
 
 #define TZ_REGION_COUNT 6
 static const tz_region_t tz_regions[TZ_REGION_COUNT] = {
-    { "Americas", tz_americas, 10 },
-    { "Europe",   tz_europe,   10 },
+    { "Americas & Caribbean", tz_americas, 27 },
+    { "Europe",   tz_europe,   17 },
     { "Asia",     tz_asia,     10 },
-    { "Africa",   tz_africa,    5 },
-    { "Oceania",  tz_oceania,   5 },
+    { "Africa",   tz_africa,   11 },
+    { "Oceania",  tz_oceania,   8 },
     { "Manual UTC Offset", tz_utc, 25 },
 };
 
@@ -824,24 +861,86 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
     draw_rect_alpha(scr, sep_x, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x40));
 
-    /* ── Content area (right of separator) ───────────────────────── */
+    /* ── Eye toggle icon (right side of field) ─────────────────── */
+    {
+        int eye_x = x + w - 30;
+        int eye_cy = y + h / 2;
+        uint32_t eye_col = g_show_password
+                           ? C_FIELD_FOCUS
+                           : rgba(0x50, 0x70, 0x90, 0xA0);
+
+        /* Eye shape: almond/ellipse outline */
+        for (int dx = -8; dx <= 8; dx++) {
+            /* top and bottom curves of the eye */
+            int dy_top = (8 - (dx < 0 ? -dx : dx)) * 3 / 8;
+            int dy_bot = -dy_top;
+            if (dy_top < 1) dy_top = 1;
+            px_set(scr, eye_x + dx, eye_cy - dy_top, eye_col);
+            px_set(scr, eye_x + dx, eye_cy + (-dy_bot), eye_col);
+        }
+        /* Iris (filled circle) */
+        draw_circle_filled(scr, eye_x, eye_cy, 2, eye_col);
+
+        /* If password hidden, draw a slash through the eye */
+        if (!g_show_password) {
+            for (int i = -5; i <= 5; i++) {
+                int sx = eye_x + i;
+                int sy = eye_cy - i * 4 / 5;
+                if ((unsigned)sx < (unsigned)scr->width &&
+                    (unsigned)sy < (unsigned)scr->height)
+                    scr->pixels[sy * scr->stride + sx] = eye_col;
+            }
+        }
+
+        /* Store hitbox for click detection */
+        g_hit_eye = (hitbox_t){ eye_x - 12, y, 28, h };
+    }
+
+    /* ── Vertical separator before eye icon ──────────────────── */
+    draw_rect_alpha(scr, x + w - 40, y + 6, 1, h - 12,
+                    rgba(0x40, 0x70, 0xA0, 0x30));
+
+    /* ── Content area (right of separator, left of eye icon) ── */
     int tx = sep_x + 10;
     int ty = y + (h - FONT_H) / 2;
+    int max_content_w = w - 40 - (sep_x - x) - 14; /* space for text */
+    int max_chars = max_content_w / 8;                /* ~8px per char */
+    if (max_chars > 24) max_chars = 24;
 
     if (f->len == 0 && !focused) {
         draw_string(scr, tx, ty, "Enter password", C_TEXT_DIM, rgba(0,0,0,0));
     } else if (f->len > 0) {
-        /* Bullet dots – evenly spaced filled circles */
-        for (int i = 0; i < f->len && i < 24; i++) {
-            int dot_cx = tx + i * 12 + 5;
-            int dot_cy = y + h / 2;
-            draw_circle_filled(scr, dot_cx, dot_cy, 3, C_TEXT);
+        if (g_show_password) {
+            /* Show actual password characters */
+            char vis[65];
+            int show = f->len < max_chars ? f->len : max_chars;
+            for (int i = 0; i < show; i++)
+                vis[i] = f->buf[i];
+            vis[show] = '\0';
+            draw_string(scr, tx, ty, vis, C_TEXT, rgba(0,0,0,0));
+        } else {
+            /* Bullet dots – evenly spaced filled circles */
+            for (int i = 0; i < f->len && i < max_chars; i++) {
+                int dot_cx = tx + i * 12 + 5;
+                int dot_cy = y + h / 2;
+                draw_circle_filled(scr, dot_cx, dot_cy, 3, C_TEXT);
+            }
         }
     }
 
     /* Blinking cursor */
     if (focused && g_cursor_vis) {
-        int cw = f->len > 0 ? f->len * 12 + 5 : 0;
+        int cw;
+        if (g_show_password && f->len > 0) {
+            /* Measure visible text width */
+            char vis[65];
+            int show = f->len < max_chars ? f->len : max_chars;
+            for (int i = 0; i < show; i++) vis[i] = f->buf[i];
+            vis[show] = '\0';
+            cw = draw_string_width(vis);
+        } else {
+            cw = f->len > 0 ? f->len * 12 + 5 : 0;
+        }
         draw_rect(scr, tx + cw + 2, ty + 1, 2, FONT_H - 2, C_CURSOR_COL);
     }
 }
@@ -1592,9 +1691,10 @@ void login_run(void)
     g_fields[FIELD_PASS].buf[0] = '\0';
     g_fields[FIELD_PASS].len    = 0;
     g_fields[FIELD_PASS].active = true;
-    g_error      = false;
-    g_blink_tick = timer_get_ticks();
-    g_cursor_vis = true;
+    g_error        = false;
+    g_show_password = false;
+    g_blink_tick   = timer_get_ticks();
+    g_cursor_vis   = true;
 
     /* If timezone not yet configured, launch the setup wizard */
     if (!rtc_tz_configured()) {
@@ -1722,6 +1822,11 @@ void login_run(void)
                 /* Footer: Sleep */
                 if (hitbox_test(&g_hit_sleep, mx, my)) {
                     power_sleep();
+                }
+
+                /* Password show/hide eye toggle */
+                if (hitbox_test(&g_hit_eye, mx, my)) {
+                    g_show_password = !g_show_password;
                 }
             }
         }
