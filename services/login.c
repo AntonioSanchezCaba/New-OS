@@ -22,6 +22,7 @@
 #include <drivers/cursor.h>
 #include <scheduler.h>
 #include <kernel/users.h>
+#include <drivers/e1000.h>
 #include <string.h>
 #include <memory.h>
 
@@ -140,6 +141,7 @@ static hitbox_t g_hit_eye;          /* password show/hide toggle */
 static hitbox_t g_hit_accessibility;
 static hitbox_t g_hit_network;
 static hitbox_t g_hit_keyboard;
+static hitbox_t g_hit_switch_user;
 
 /* Popup notification state */
 #define POPUP_NONE       0
@@ -149,6 +151,18 @@ static hitbox_t g_hit_keyboard;
 static int      g_popup      = POPUP_NONE;
 static uint32_t g_popup_tick = 0;     /* when the popup appeared */
 #define POPUP_DURATION   (TIMER_FREQ * 3)  /* 3 seconds */
+
+/* Switch User / Create User panel state */
+#define SWITCH_NONE     0
+#define SWITCH_LIST     1     /* showing user list */
+#define SWITCH_CREATE   2     /* creating a new user */
+static int  g_switch_mode   = SWITCH_NONE;
+static int  g_switch_sel    = 0;       /* selected user index */
+static int  g_switch_field  = 0;       /* 0=username, 1=password in create mode */
+static char g_new_user[32];
+static int  g_new_user_len  = 0;
+static char g_new_pass[64];
+static int  g_new_pass_len  = 0;
 
 /* ── Timezone setup wizard state ─────────────────────────────────────── */
 #define TZ_WIZARD_NONE    0
@@ -1510,10 +1524,12 @@ static void draw_login_screen(canvas_t* scr)
     int icon_y = info_y + 50;
     draw_status_indicators(scr, left_margin, icon_y, C_INFO);
 
-    /* ── RIGHT SIDE: Login card ─────────────────────────────────────── */
-    int card_x = W - CARD_W - W * 10 / 100;
+    /* ── RIGHT SIDE: Login card (centered on the right half) ──────── */
+    int right_half_cx = (W / 2 + W) / 2;    /* center of right half */
+    int card_x = right_half_cx - CARD_W / 2;
     int card_y = H * 18 / 100;
     if (card_x < W / 2) card_x = W / 2;
+    if (card_x + CARD_W > W - 20) card_x = W - CARD_W - 20;
 
     draw_glass_card(scr, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS);
 
@@ -1629,7 +1645,9 @@ static void draw_login_screen(canvas_t* scr)
             draw_hline(scr, ix - half, iy + dy, half * 2 + 1, C_FOOTER_HI);
         }
 
+        int sw_tw = draw_string_width("Switch User");
         draw_string(scr, fl + 20, ry, "Switch User", C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_switch_user = (hitbox_t){ fl, ry, sw_tw + 20, 16 };
     }
 
     /* --- Separator line --- */
@@ -1753,7 +1771,11 @@ static void draw_login_screen(canvas_t* scr)
         uint32_t elapsed = timer_get_ticks() - g_popup_tick;
         if (elapsed < POPUP_DURATION) {
             const char* msg = "";
-            if (g_popup == POPUP_NETWORK)   msg = "Network: Connected (Ethernet)";
+            if (g_popup == POPUP_NETWORK) {
+                msg = e1000_link_up()
+                    ? "Network: Connected (Ethernet)"
+                    : "Network: Disconnected";
+            }
             if (g_popup == POPUP_KEYBOARD)  msg = "Keyboard Layout: EN-US (QWERTY)";
             if (g_popup == POPUP_ACCESS)    msg = "Accessibility: No options configured";
 
@@ -1761,11 +1783,13 @@ static void draw_login_screen(canvas_t* scr)
             int ph = 30;
             int ppx = (W - pw) / 2;
             int ppy = H - 60;
-            /* Background pill */
             draw_rect_alpha(scr, ppx, ppy, pw, ph, rgba(0x10, 0x20, 0x38, 0xE0));
             draw_rect_rounded_outline(scr, ppx, ppy, pw, ph, 6, 1,
                                        rgba(0x40, 0x80, 0xC0, 0x80));
-            draw_string(scr, ppx + 20, ppy + 8, msg, C_NAME, rgba(0,0,0,0));
+            uint32_t msg_col = C_NAME;
+            if (g_popup == POPUP_NETWORK && !e1000_link_up())
+                msg_col = C_ERROR_COL;
+            draw_string(scr, ppx + 20, ppy + 8, msg, msg_col, rgba(0,0,0,0));
         } else {
             g_popup = POPUP_NONE;
         }
@@ -1774,6 +1798,124 @@ static void draw_login_screen(canvas_t* scr)
     /* ── Timezone wizard overlay (if active) ─────────────────────────── */
     if (g_tz_wizard >= TZ_WIZARD_CLOCK && g_tz_wizard <= TZ_WIZARD_CITY)
         draw_tz_wizard(scr);
+
+    /* ── Switch User overlay (if active) ──────────────────────────── */
+    if (g_switch_mode != SWITCH_NONE) {
+        int sw_w = 380, sw_h = 300, sw_r = 16;
+        int sw_x = (W - sw_w) / 2;
+        int sw_y = (H - sw_h) / 2;
+
+        draw_rect_alpha(scr, 0, 0, W, H, rgba(0, 0, 0, 0x80));
+        draw_glass_card(scr, sw_x, sw_y, sw_w, sw_h, sw_r);
+
+        if (g_switch_mode == SWITCH_LIST) {
+            const char* t = "Switch User";
+            int t_w = draw_string_width(t);
+            draw_string(scr, sw_x + (sw_w - t_w) / 2, sw_y + 20,
+                        t, C_NAME, rgba(0,0,0,0));
+
+            const char* sub = "Click user or press Enter. Esc to cancel.";
+            int sub_w = draw_string_width(sub);
+            draw_string(scr, sw_x + (sw_w - sub_w) / 2, sw_y + 38,
+                        sub, C_SUBTEXT, rgba(0,0,0,0));
+
+            draw_rect_alpha(scr, sw_x + 20, sw_y + 56,
+                            sw_w - 40, 1, rgba(0x40, 0x60, 0x80, 0x30));
+
+            int count = users_count();
+            const user_t* ulist = users_list();
+            int list_y = sw_y + 66;
+
+            for (int i = 0; i < count && i < 8; i++) {
+                if (!ulist[i].active) continue;
+                int iy = list_y + i * 26;
+                bool sel = (i == g_switch_sel);
+                if (sel) {
+                    draw_rect_alpha(scr, sw_x + 20, iy,
+                                    sw_w - 40, 24,
+                                    rgba(0x30, 0x70, 0xB0, 0x60));
+                    draw_rect_rounded_outline(scr, sw_x + 20, iy,
+                                               sw_w - 40, 24, 4, 1,
+                                               C_FIELD_FOCUS);
+                }
+                /* User icon */
+                draw_circle_filled(scr, sw_x + 36, iy + 12, 6,
+                                   sel ? C_NAME : C_TEXT);
+                draw_string(scr, sw_x + 50, iy + 4, ulist[i].name,
+                            sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
+            }
+
+            /* Create new user option at bottom */
+            int cy = list_y + count * 26 + 10;
+            bool sel_new = (g_switch_sel == count);
+            if (sel_new) {
+                draw_rect_alpha(scr, sw_x + 20, cy,
+                                sw_w - 40, 24,
+                                rgba(0x20, 0x60, 0x40, 0x60));
+                draw_rect_rounded_outline(scr, sw_x + 20, cy,
+                                           sw_w - 40, 24, 4, 1,
+                                           rgba(0x40, 0xC0, 0x80, 0x80));
+            }
+            draw_string(scr, sw_x + 36, cy + 4, "+ Create New User",
+                        sel_new ? rgba(0x60, 0xE0, 0xA0, 0xFF) : C_INFO,
+                        rgba(0,0,0,0));
+
+        } else if (g_switch_mode == SWITCH_CREATE) {
+            const char* t = "Create New User";
+            int t_w = draw_string_width(t);
+            draw_string(scr, sw_x + (sw_w - t_w) / 2, sw_y + 20,
+                        t, C_NAME, rgba(0,0,0,0));
+
+            const char* sub = "Type username and password. Esc to cancel.";
+            int sub_w = draw_string_width(sub);
+            draw_string(scr, sw_x + (sw_w - sub_w) / 2, sw_y + 38,
+                        sub, C_SUBTEXT, rgba(0,0,0,0));
+
+            draw_rect_alpha(scr, sw_x + 20, sw_y + 56,
+                            sw_w - 40, 1, rgba(0x40, 0x60, 0x80, 0x30));
+
+            int fy = sw_y + 72;
+            /* Username field */
+            draw_string(scr, sw_x + 30, fy, "Username:",
+                        C_INFO, rgba(0,0,0,0));
+            draw_rect_alpha(scr, sw_x + 30, fy + 18,
+                            sw_w - 60, 28, C_FIELD_BG);
+            uint32_t ub = g_switch_field == 0 ? C_FIELD_FOCUS : C_FIELD_BORDER;
+            draw_rect_rounded_outline(scr, sw_x + 30, fy + 18,
+                                       sw_w - 60, 28, 4, 1, ub);
+            if (g_new_user_len > 0)
+                draw_string(scr, sw_x + 38, fy + 24, g_new_user,
+                            C_TEXT, rgba(0,0,0,0));
+
+            /* Password field */
+            fy += 60;
+            draw_string(scr, sw_x + 30, fy, "Password:",
+                        C_INFO, rgba(0,0,0,0));
+            draw_rect_alpha(scr, sw_x + 30, fy + 18,
+                            sw_w - 60, 28, C_FIELD_BG);
+            uint32_t pb = g_switch_field == 1 ? C_FIELD_FOCUS : C_FIELD_BORDER;
+            draw_rect_rounded_outline(scr, sw_x + 30, fy + 18,
+                                       sw_w - 60, 28, 4, 1, pb);
+            /* Show dots for password */
+            for (int i = 0; i < g_new_pass_len && i < 24; i++) {
+                draw_circle_filled(scr, sw_x + 42 + i * 10, fy + 32,
+                                   3, C_TEXT);
+            }
+
+            /* Create button */
+            fy += 64;
+            int cb_w = 160, cb_h = 30;
+            int cb_x = sw_x + (sw_w - cb_w) / 2;
+            draw_rect_alpha(scr, cb_x, fy, cb_w, cb_h,
+                            rgba(0x20, 0x70, 0x50, 0xC0));
+            draw_rect_rounded_outline(scr, cb_x, fy, cb_w, cb_h,
+                                       6, 1, rgba(0x40, 0xC0, 0x80, 0x80));
+            const char* cbt = "CREATE";
+            int cbt_w = draw_string_width(cbt);
+            draw_string(scr, cb_x + (cb_w - cbt_w) / 2, fy + 8,
+                        cbt, C_NAME, rgba(0,0,0,0));
+        }
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1896,6 +2038,68 @@ void login_run(void)
                     }
                 }
 
+            } else if (g_switch_mode == SWITCH_LIST) {
+                /* --- Switch User list keyboard handling --- */
+                int count = users_count();
+                int max_sel = count; /* count = "+ Create New User" */
+                if (kc == KEY_UP_ARROW) {
+                    if (g_switch_sel > 0) g_switch_sel--;
+                } else if (kc == KEY_DOWN_ARROW) {
+                    if (g_switch_sel < max_sel) g_switch_sel++;
+                } else if (ch == '\n' || ch == '\r') {
+                    if (g_switch_sel < count) {
+                        /* Switch to selected user */
+                        const user_t* ulist = users_list();
+                        strncpy(login_username, ulist[g_switch_sel].name, 63);
+                        login_username[63] = '\0';
+                        g_fields[FIELD_PASS].len = 0;
+                        g_fields[FIELD_PASS].buf[0] = '\0';
+                        g_error = false;
+                        g_switch_mode = SWITCH_NONE;
+                    } else {
+                        /* Create new user */
+                        g_switch_mode = SWITCH_CREATE;
+                        g_switch_field = 0;
+                        g_new_user[0] = '\0'; g_new_user_len = 0;
+                        g_new_pass[0] = '\0'; g_new_pass_len = 0;
+                    }
+                } else if (kc == 0x1B) {
+                    g_switch_mode = SWITCH_NONE;
+                }
+
+            } else if (g_switch_mode == SWITCH_CREATE) {
+                /* --- Create user keyboard handling --- */
+                if (kc == 0x1B) {
+                    g_switch_mode = SWITCH_LIST;
+                } else if (ch == '\t') {
+                    g_switch_field = g_switch_field == 0 ? 1 : 0;
+                } else if (ch == '\n' || ch == '\r') {
+                    if (g_new_user_len > 0 && g_new_pass_len > 0) {
+                        if (users_create(g_new_user, g_new_pass, "/home", "/bin/sh") == 0) {
+                            strncpy(login_username, g_new_user, 63);
+                            login_username[63] = '\0';
+                            g_fields[FIELD_PASS].len = 0;
+                            g_fields[FIELD_PASS].buf[0] = '\0';
+                            g_error = false;
+                            g_switch_mode = SWITCH_NONE;
+                        }
+                    }
+                } else if (ch == '\b') {
+                    if (g_switch_field == 0 && g_new_user_len > 0) {
+                        g_new_user[--g_new_user_len] = '\0';
+                    } else if (g_switch_field == 1 && g_new_pass_len > 0) {
+                        g_new_pass[--g_new_pass_len] = '\0';
+                    }
+                } else if (ch >= 0x20 && ch < 0x7F) {
+                    if (g_switch_field == 0 && g_new_user_len < 31) {
+                        g_new_user[g_new_user_len++] = ch;
+                        g_new_user[g_new_user_len] = '\0';
+                    } else if (g_switch_field == 1 && g_new_pass_len < 63) {
+                        g_new_pass[g_new_pass_len++] = ch;
+                        g_new_pass[g_new_pass_len] = '\0';
+                    }
+                }
+
             } else {
                 /* --- Normal password field handling --- */
                 field_t* f = &g_fields[FIELD_PASS];
@@ -2008,7 +2212,129 @@ void login_run(void)
                 }
             }
 
-            if (left_edge && g_tz_wizard == TZ_WIZARD_NONE) {
+            /* --- Scroll wheel in timezone wizard --- */
+            if (mouse.scroll != 0 && g_tz_wizard >= TZ_WIZARD_CLOCK &&
+                g_tz_wizard <= TZ_WIZARD_CITY) {
+                int8_t sw = mouse.scroll;
+                mouse.scroll = 0; /* consume the scroll event */
+                if (g_tz_wizard == TZ_WIZARD_CLOCK) {
+                    g_tz_clock_sel = (sw < 0) ? 1 : 0;
+                } else {
+                    int count;
+                    int* sel;
+                    if (g_tz_wizard == TZ_WIZARD_REGION) {
+                        count = TZ_REGION_COUNT;
+                        sel = &g_tz_region_sel;
+                    } else {
+                        count = tz_regions[g_tz_region_sel].count;
+                        sel = &g_tz_city_sel;
+                    }
+                    if (sw < 0) {
+                        if (*sel < count - 1) (*sel)++;
+                    } else {
+                        if (*sel > 0) (*sel)--;
+                    }
+                }
+            }
+
+            /* --- Switch User overlay mouse handling --- */
+            if (left_edge && g_switch_mode == SWITCH_LIST) {
+                int mx = mev.x, my = mev.y;
+                int W = screen.width, H = screen.height;
+                int sw_w = 380, sw_h = 300;
+                int sw_x = (W - sw_w) / 2;
+                int sw_y = (H - sw_h) / 2;
+
+                /* Check if click is outside the overlay -> close */
+                if (mx < sw_x || mx > sw_x + sw_w ||
+                    my < sw_y || my > sw_y + sw_h) {
+                    g_switch_mode = SWITCH_NONE;
+                } else {
+                    int count = users_count();
+                    int list_y = sw_y + 66;
+
+                    /* Check user list items */
+                    for (int i = 0; i < count && i < 8; i++) {
+                        int iy = list_y + i * 26;
+                        if (mx >= sw_x + 20 && mx < sw_x + sw_w - 20 &&
+                            my >= iy && my < iy + 24) {
+                            if (g_switch_sel == i) {
+                                /* Confirm: switch to this user */
+                                const user_t* ulist = users_list();
+                                strncpy(login_username, ulist[i].name, 63);
+                                login_username[63] = '\0';
+                                g_fields[FIELD_PASS].len = 0;
+                                g_fields[FIELD_PASS].buf[0] = '\0';
+                                g_error = false;
+                                g_switch_mode = SWITCH_NONE;
+                            } else {
+                                g_switch_sel = i;
+                            }
+                            break;
+                        }
+                    }
+
+                    /* Check "+ Create New User" option */
+                    int cy = list_y + count * 26 + 10;
+                    if (mx >= sw_x + 20 && mx < sw_x + sw_w - 20 &&
+                        my >= cy && my < cy + 24) {
+                        if (g_switch_sel == count) {
+                            /* Already selected, confirm -> create mode */
+                            g_switch_mode = SWITCH_CREATE;
+                            g_switch_field = 0;
+                            g_new_user[0] = '\0'; g_new_user_len = 0;
+                            g_new_pass[0] = '\0'; g_new_pass_len = 0;
+                        } else {
+                            g_switch_sel = count;
+                        }
+                    }
+                }
+            } else if (left_edge && g_switch_mode == SWITCH_CREATE) {
+                int mx = mev.x, my = mev.y;
+                int W = screen.width, H = screen.height;
+                int sw_w = 380, sw_h = 300;
+                int sw_x = (W - sw_w) / 2;
+                int sw_y = (H - sw_h) / 2;
+
+                /* Click outside -> close */
+                if (mx < sw_x || mx > sw_x + sw_w ||
+                    my < sw_y || my > sw_y + sw_h) {
+                    g_switch_mode = SWITCH_NONE;
+                } else {
+                    int fy = sw_y + 72;
+                    /* Username field click */
+                    if (mx >= sw_x + 30 && mx < sw_x + sw_w - 30 &&
+                        my >= fy + 18 && my < fy + 46) {
+                        g_switch_field = 0;
+                    }
+                    /* Password field click */
+                    int fy2 = fy + 60;
+                    if (mx >= sw_x + 30 && mx < sw_x + sw_w - 30 &&
+                        my >= fy2 + 18 && my < fy2 + 46) {
+                        g_switch_field = 1;
+                    }
+                    /* Create button click */
+                    int fy3 = fy2 + 64;
+                    int cb_w = 160, cb_h = 30;
+                    int cb_x = sw_x + (sw_w - cb_w) / 2;
+                    if (mx >= cb_x && mx < cb_x + cb_w &&
+                        my >= fy3 && my < fy3 + cb_h) {
+                        if (g_new_user_len > 0 && g_new_pass_len > 0) {
+                            if (users_create(g_new_user, g_new_pass, "/home", "/bin/sh") == 0) {
+                                strncpy(login_username, g_new_user, 63);
+                                login_username[63] = '\0';
+                                g_fields[FIELD_PASS].len = 0;
+                                g_fields[FIELD_PASS].buf[0] = '\0';
+                                g_error = false;
+                                g_switch_mode = SWITCH_NONE;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (left_edge && g_tz_wizard == TZ_WIZARD_NONE &&
+                g_switch_mode == SWITCH_NONE) {
                 int mx = mev.x, my = mev.y;
 
                 /* Authenticate button */
@@ -2056,6 +2382,12 @@ void login_run(void)
                 if (hitbox_test(&g_hit_keyboard, mx, my)) {
                     g_popup = POPUP_KEYBOARD;
                     g_popup_tick = timer_get_ticks();
+                }
+
+                /* Footer: Switch User */
+                if (hitbox_test(&g_hit_switch_user, mx, my)) {
+                    g_switch_mode = SWITCH_LIST;
+                    g_switch_sel = 0;
                 }
             }
         }

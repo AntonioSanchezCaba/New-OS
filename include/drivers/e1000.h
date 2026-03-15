@@ -25,6 +25,9 @@ void e1000_receive_poll(void);
 void e1000_get_mac(mac_addr_t* out);
 void e1000_get_stats(e1000_stats_t* out);
 
+/* Check if network link is up */
+bool e1000_link_up(void);
+
 /* Called from IRQ handler */
 void e1000_irq_handler(void* regs);
 

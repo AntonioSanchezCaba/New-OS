@@ -370,6 +370,12 @@ void e1000_get_stats(e1000_stats_t* out)
     out->rx_errors  = g_rx_errors;
 }
 
+bool e1000_link_up(void)
+{
+    if (!e1000_mmio) return false;
+    return (e1000_read(E1000_STATUS) & 0x2) != 0;
+}
+
 void e1000_irq_handler(void* regs)
 {
     (void)regs;
