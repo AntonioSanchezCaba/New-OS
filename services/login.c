@@ -882,41 +882,23 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
     draw_rect_alpha(scr, sep_x, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x40));
 
-    /* ── Eye toggle icon (right side, properly centered in zone) ── */
+    /* ── Eye toggle button (right side of field) ───────────── */
+    /*
+     * Layout:  [capslock | sep | password text | sep | eye icon ]
+     *                38px                             40px zone
+     * Eye center is at (x + w - 22), giving 12px padding from
+     * the field's right edge to avoid overlapping the border.
+     */
+    int eye_cx = x + w - 22;
+    int eye_cy = y + h / 2;
     {
-        int eye_zone = 32;  /* clickable zone width */
-        int eye_cx = x + w - eye_zone / 2 - 4; /* center of eye zone */
-        int eye_cy = y + h / 2;
-        uint32_t c_on  = rgba(0x50, 0xC0, 0xFF, 0xFF);  /* bright cyan */
-        uint32_t c_off = rgba(0x55, 0x75, 0x95, 0xA0);  /* subtle gray */
+        uint32_t c_on  = rgba(0x50, 0xC0, 0xFF, 0xFF);
+        uint32_t c_off = rgba(0x55, 0x75, 0x95, 0xA0);
         uint32_t eye_col = g_show_password ? c_on : c_off;
 
-        /*
-         * Draw a clean eye icon:
-         *  - Almond shape using two quadratic arcs
-         *  - Radius 8 half-width, 4 half-height
-         *  - Filled iris circle + dark pupil
-         *  - Slash line when hidden
-         */
-        int R = 8, A = 4;
+        int R = 7, A = 3;
 
-        /* Fill the interior of the eye lightly when active */
-        if (g_show_password) {
-            for (int dx = -(R-1); dx <= (R-1); dx++) {
-                int frac = R * R - dx * dx;
-                int dy_lid = A * frac / (R * R);
-                for (int dy = -dy_lid + 1; dy < dy_lid; dy++) {
-                    int px_x = eye_cx + dx, py_y = eye_cy + dy;
-                    if ((unsigned)px_x < (unsigned)scr->width &&
-                        (unsigned)py_y < (unsigned)scr->height)
-                        scr->pixels[py_y * scr->stride + px_x] =
-                            fb_blend(scr->pixels[py_y * scr->stride + px_x],
-                                     rgba(0x30, 0x60, 0x90, 0x30));
-                }
-            }
-        }
-
-        /* Lid outlines */
+        /* Lid outlines (almond shape) */
         for (int dx = -R; dx <= R; dx++) {
             int frac = R * R - dx * dx;
             int dy_lid = A * frac / (R * R);
@@ -933,39 +915,33 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
             }
         }
 
-        /* Iris: filled circle */
-        draw_circle_filled(scr, eye_cx, eye_cy, 3, eye_col);
-        /* Pupil: dark center */
+        /* Iris: filled circle radius 2 */
+        draw_circle_filled(scr, eye_cx, eye_cy, 2, eye_col);
+        /* Pupil: dark center dot */
         px_set(scr, eye_cx, eye_cy, rgba(0x08, 0x10, 0x1C, 0xFF));
-        /* Specular highlight on iris */
-        px_set(scr, eye_cx - 1, eye_cy - 1, rgba(0xA0, 0xD0, 0xFF, 0x80));
 
-        /* Diagonal slash when password is hidden */
+        /* Diagonal slash when hidden (bottom-left to top-right) */
         if (!g_show_password) {
-            for (int i = -7; i <= 7; i++) {
+            for (int i = -6; i <= 6; i++) {
                 int sx = eye_cx + i;
-                int sy = eye_cy + (i * 5) / 7;
-                for (int t = 0; t <= 1; t++) {
-                    int px_sx = sx + t;
-                    if ((unsigned)px_sx < (unsigned)scr->width &&
-                        (unsigned)sy < (unsigned)scr->height)
-                        scr->pixels[sy * scr->stride + px_sx] = eye_col;
-                }
+                int sy = eye_cy + (i * 4) / 6;
+                px_set(scr, sx, sy, eye_col);
+                px_set(scr, sx + 1, sy, eye_col);
             }
         }
 
-        /* Store hitbox (entire right zone of field) */
-        g_hit_eye = (hitbox_t){ x + w - eye_zone - 4, y, eye_zone + 4, h };
+        /* Store hitbox: 40px zone at right of field */
+        g_hit_eye = (hitbox_t){ x + w - 40, y, 40, h };
     }
 
     /* ── Vertical separator before eye zone ──────────────────── */
-    draw_rect_alpha(scr, x + w - 36, y + 6, 1, h - 12,
+    draw_rect_alpha(scr, x + w - 42, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x30));
 
     /* ── Content area (right of separator, left of eye zone) ── */
     int tx = sep_x + 10;
     int ty = y + (h - FONT_H) / 2;
-    int max_content_w = w - 36 - (sep_x - x) - 10; /* text area width */
+    int max_content_w = w - 42 - (sep_x - x) - 10; /* text area width */
     int max_chars = max_content_w / 8;                /* ~8px per char */
     if (max_chars > 24) max_chars = 24;
 
@@ -1845,7 +1821,8 @@ void login_run(void)
         g_tz_wizard = TZ_WIZARD_NONE;
     }
 
-    bool    prev_enter   = false;
+    bool    prev_enter    = false;
+    bool    prev_left_down = false; /* for mouse click edge detection */
 
     while (1) {
         /* ── Cursor blink ────────────────────────────────────────── */
@@ -1953,8 +1930,13 @@ void login_run(void)
             mouse_event_t mev;
             mouse_get_event(&mev);
 
+            /* Edge-detect: only fire on the transition from not-clicked
+             * to clicked, preventing multiple toggles per physical click */
+            bool left_edge = mev.left_clicked && !prev_left_down;
+            prev_left_down = (mev.buttons & 0x01) != 0;
+
             /* --- Timezone wizard mouse handling --- */
-            if (mev.left_clicked && g_tz_wizard >= TZ_WIZARD_CLOCK &&
+            if (left_edge && g_tz_wizard >= TZ_WIZARD_CLOCK &&
                 g_tz_wizard <= TZ_WIZARD_CITY) {
                 int mx = mev.x, my = mev.y;
                 int W = screen.width, H = screen.height;
@@ -2026,7 +2008,7 @@ void login_run(void)
                 }
             }
 
-            if (mev.left_clicked && g_tz_wizard == TZ_WIZARD_NONE) {
+            if (left_edge && g_tz_wizard == TZ_WIZARD_NONE) {
                 int mx = mev.x, my = mev.y;
 
                 /* Authenticate button */
