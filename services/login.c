@@ -591,9 +591,75 @@ static void draw_sphere_avatar(canvas_t* scr, int cx, int cy, int rad)
     }
 }
 
+/* ── Safe pixel plot helpers (used by icons + password field) ────────── */
+static inline void px_blend(canvas_t* s, int x, int y, uint32_t c)
+{
+    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
+        s->pixels[y * s->stride + x] = fb_blend(s->pixels[y * s->stride + x], c);
+}
+static inline void px_set(canvas_t* s, int x, int y, uint32_t c)
+{
+    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
+        s->pixels[y * s->stride + x] = c;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
  * PASSWORD FIELD
+ *
+ * Reference layout:  [ ⇧ | ● ● ● ● ● ● ● ●  _ ]
+ *   - Caps Lock up-arrow icon on the left
+ *   - Vertical separator
+ *   - Password bullet dots
+ *   - Blinking cursor
  * ═══════════════════════════════════════════════════════════════════════ */
+
+/* Draw the Caps Lock up-arrow icon (outlined hollow arrow) */
+static void draw_capslock_icon(canvas_t* scr, int cx, int cy, uint32_t color)
+{
+    /* Arrow dimensions */
+    int arrow_w = 14;     /* total width of arrowhead base */
+    int arrow_tip_h = 10; /* height from tip to shoulder */
+    int shaft_w = 6;      /* shaft width */
+    int shaft_h = 5;      /* shaft height below shoulder */
+    int base_h = 3;       /* base bar height */
+    int gap = 2;          /* gap between shaft and base */
+
+    int top_y = cy - (arrow_tip_h + shaft_h + gap + base_h) / 2;
+
+    /* --- Arrowhead (outlined triangle) --- */
+    /* Draw filled then cut interior */
+    for (int row = 0; row < arrow_tip_h; row++) {
+        /* Width at this row: starts at 1 at top, widens to arrow_w */
+        int half = (arrow_w * row) / (2 * (arrow_tip_h - 1));
+        if (row == 0) half = 0;
+        int lx = cx - half;
+        int rx = cx + half;
+        int py = top_y + row;
+
+        /* Draw outline only: left edge, right edge, and top row */
+        if (row < 2 || row == arrow_tip_h - 1) {
+            /* Full row for top and bottom of arrowhead */
+            for (int x = lx; x <= rx; x++)
+                px_blend(scr, x, py, color);
+        } else {
+            /* Left and right edges (2px thick) */
+            px_blend(scr, lx, py, color);
+            px_blend(scr, lx + 1, py, color);
+            px_blend(scr, rx, py, color);
+            px_blend(scr, rx - 1, py, color);
+        }
+    }
+
+    /* --- Shaft (hollow rectangle) --- */
+    int shaft_y = top_y + arrow_tip_h;
+    int shaft_x = cx - shaft_w / 2;
+    draw_rect_rounded_outline(scr, shaft_x, shaft_y, shaft_w, shaft_h, 1, 1, color);
+
+    /* --- Base bar (solid) --- */
+    int base_y = shaft_y + shaft_h + gap;
+    int base_x = cx - shaft_w / 2;
+    draw_rect_rounded(scr, base_x, base_y, shaft_w, base_h, 1, color);
+}
 
 static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
                                  field_t* f, bool focused)
@@ -623,44 +689,37 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
                         rgba(0x40, 0xA0, 0xE0, 0x60));
     }
 
-    /* Shield/lock icon area */
-    int icon_cx = x + 18;
+    /* ── Caps Lock up-arrow icon (left zone) ─────────────────────── */
+    int icon_cx = x + 20;
     int icon_cy = y + h / 2;
-    /* Simple upward arrow/shield */
-    draw_circle_filled(scr, icon_cx, icon_cy - 2, 5,
-                       focused ? C_FIELD_FOCUS : C_FIELD_BORDER);
-    draw_rect(scr, icon_cx - 4, icon_cy + 2, 9, 6,
-              focused ? C_FIELD_FOCUS : C_FIELD_BORDER);
-    /* Keyhole */
-    draw_rect(scr, icon_cx - 1, icon_cy, 3, 4, C_FIELD_BG);
+    uint32_t icon_col = focused ? rgba(0x50, 0x90, 0xC0, 0xC0)
+                                : rgba(0x40, 0x60, 0x80, 0x80);
+    draw_capslock_icon(scr, icon_cx, icon_cy, icon_col);
 
-    /* Separator */
-    draw_rect_alpha(scr, x + 32, y + 8, 1, h - 16,
-                    rgba(0x40, 0x60, 0x80, 0x50));
+    /* ── Vertical separator ──────────────────────────────────────── */
+    int sep_x = x + 38;
+    draw_rect_alpha(scr, sep_x, y + 6, 1, h - 12,
+                    rgba(0x40, 0x70, 0xA0, 0x40));
 
-    /* Content */
-    int tx = x + FIELD_PAD;
+    /* ── Content area (right of separator) ───────────────────────── */
+    int tx = sep_x + 10;
     int ty = y + (h - FONT_H) / 2;
 
     if (f->len == 0 && !focused) {
         draw_string(scr, tx, ty, "Enter password", C_TEXT_DIM, rgba(0,0,0,0));
     } else if (f->len > 0) {
-        /* Smooth bullet dots */
-        for (int i = 0; i < f->len && i < 32; i++) {
-            int dot_cx = tx + i * 14 + 4;
+        /* Bullet dots – evenly spaced filled circles */
+        for (int i = 0; i < f->len && i < 24; i++) {
+            int dot_cx = tx + i * 12 + 5;
             int dot_cy = y + h / 2;
-            /* Glow around dot */
-            draw_circle_filled(scr, dot_cx, dot_cy, 5,
-                               rgba(0x80, 0xC0, 0xE0, 0x18));
-            /* Solid dot */
             draw_circle_filled(scr, dot_cx, dot_cy, 3, C_TEXT);
         }
     }
 
     /* Blinking cursor */
     if (focused && g_cursor_vis) {
-        int cw = f->len > 0 ? f->len * 14 + 4 : 0;
-        draw_rect(scr, tx + cw + 1, ty, 2, FONT_H, C_CURSOR_COL);
+        int cw = f->len > 0 ? f->len * 12 + 5 : 0;
+        draw_rect(scr, tx + cw + 2, ty + 1, 2, FONT_H - 2, C_CURSOR_COL);
     }
 }
 
@@ -744,18 +803,6 @@ static void draw_auth_button(canvas_t* scr, int x, int y, int w, int h)
  * Reference layout (left to right):
  *   WiFi | Signal Bars | separator | Drive | Arrows | Sync | sep | Shield
  * ═══════════════════════════════════════════════════════════════════════ */
-
-/* Safe pixel plot helper */
-static inline void px_blend(canvas_t* s, int x, int y, uint32_t c)
-{
-    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
-        s->pixels[y * s->stride + x] = fb_blend(s->pixels[y * s->stride + x], c);
-}
-static inline void px_set(canvas_t* s, int x, int y, uint32_t c)
-{
-    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
-        s->pixels[y * s->stride + x] = c;
-}
 
 /* 1) WiFi icon – center dot + 3 concentric arcs (upper half only) */
 static void draw_icon_wifi(canvas_t* scr, int cx, int cy, uint32_t color)
@@ -1077,23 +1124,112 @@ static void draw_login_screen(canvas_t* scr)
     g_btn_x = btn_x;
     g_btn_y = btn_y;
 
-    /* ── Footer ─────────────────────────────────────────────────────── */
-    int footer_y = card_y + CARD_H + 20;
+    /* ── Footer: Pre-login system menu ─────────────────────────────── */
+    /*
+     * Reference layout (below the card):
+     *   Row 1:  👤 Switch User
+     *   ─────────────────────────────────────────
+     *   Row 2:  ⏻ Shutdown / Restart / Sleep  (i) Accessibility  ≋ Network
+     *   Row 3:  ⌨ Keyboard: EN-US
+     */
+    int footer_y = card_y + CARD_H + 16;
+    int fl = card_x + 16;             /* footer left margin */
+    int fr = card_x + CARD_W - 16;    /* footer right edge */
 
-    /* Separator */
-    draw_rect_alpha(scr, card_x + 20, footer_y - 6, CARD_W - 40, 1,
-                    rgba(0x40, 0x60, 0x80, 0x28));
+    /* --- Row 1: Switch User (person icon + text) --- */
+    {
+        int ry = footer_y;
+        /* Person icon (head circle + body arc) */
+        int ix = fl + 6, iy = ry + 6;
+        draw_circle_filled(scr, ix, iy - 2, 4, C_FOOTER_HI); /* head */
+        /* Shoulders/torso arc */
+        for (int dy = 3; dy <= 8; dy++) {
+            int half = 5 - (8 - dy) / 2;
+            if (half < 2) half = 2;
+            draw_hline(scr, ix - half, iy + dy, half * 2 + 1, C_FOOTER_HI);
+            if (dy == 3) break; /* just top of shoulders visible */
+        }
+        /* Body (small trapezoid) */
+        for (int dy = 4; dy <= 7; dy++) {
+            int half = 3 + (dy - 4) / 2;
+            draw_hline(scr, ix - half, iy + dy, half * 2 + 1, C_FOOTER_HI);
+        }
 
-    /* Power actions */
-    /* Power icon */
-    draw_circle(scr, card_cx - 86, footer_y + 7, 5, C_FOOTER);
-    draw_vline(scr, card_cx - 86, footer_y + 1, 5, C_FOOTER);
+        draw_string(scr, fl + 20, ry, "Switch User", C_FOOTER_HI, rgba(0,0,0,0));
+    }
 
-    draw_string(scr, card_cx - 76, footer_y, "Shutdown / Restart / Sleep",
-                C_FOOTER_HI, rgba(0,0,0,0));
+    /* --- Separator line --- */
+    int sep_row = footer_y + 18;
+    draw_rect_alpha(scr, fl, sep_row, fr - fl, 1,
+                    rgba(0x40, 0x60, 0x80, 0x30));
 
-    draw_string(scr, card_x + CARD_W - 110, footer_y + 22,
-                "Keyboard: EN-US", C_FOOTER, rgba(0,0,0,0));
+    /* --- Row 2: Power | Accessibility | Network --- */
+    {
+        int ry = sep_row + 6;
+        int cx_pos = fl;
+
+        /* Power icon (circle with line) */
+        draw_circle(scr, cx_pos + 6, ry + 7, 5, C_FOOTER);
+        draw_vline(scr, cx_pos + 6, ry + 1, 5, C_FOOTER);
+        cx_pos += 16;
+
+        draw_string(scr, cx_pos, ry + 1, "Shutdown / Restart / Sleep",
+                    C_FOOTER_HI, rgba(0,0,0,0));
+        cx_pos += draw_string_width("Shutdown / Restart / Sleep") + 12;
+
+        /* Accessibility icon: (i) in a circle */
+        draw_circle(scr, cx_pos + 6, ry + 7, 6, C_FOOTER);
+        /* letter i: dot + vertical bar */
+        px_set(scr, cx_pos + 6, ry + 4, C_FOOTER);
+        draw_vline(scr, cx_pos + 6, ry + 6, 5, C_FOOTER);
+        cx_pos += 16;
+
+        draw_string(scr, cx_pos, ry + 1, "Accessibility",
+                    C_FOOTER_HI, rgba(0,0,0,0));
+        cx_pos += draw_string_width("Accessibility") + 12;
+
+        /* Network/WiFi mini-icon */
+        {
+            int wcx = cx_pos + 6, wcy = ry + 8;
+            draw_circle_filled(scr, wcx, wcy + 3, 1, C_FOOTER);
+            /* Two small arcs */
+            for (int dx = -4; dx <= 4; dx++) {
+                int d2 = 16 - dx * dx;
+                if (d2 < 0) continue;
+                int dy = isqrt(d2);
+                if ((dx < 0 ? -dx : dx) > dy) continue;
+                px_set(scr, wcx + dx, wcy + 3 - dy, C_FOOTER);
+            }
+            for (int dx = -7; dx <= 7; dx++) {
+                int d2 = 49 - dx * dx;
+                if (d2 < 0) continue;
+                int dy = isqrt(d2);
+                if ((dx < 0 ? -dx : dx) > dy) continue;
+                px_set(scr, wcx + dx, wcy + 3 - dy, C_FOOTER);
+            }
+        }
+        cx_pos += 16;
+
+        draw_string(scr, cx_pos, ry + 1, "Network",
+                    C_FOOTER_HI, rgba(0,0,0,0));
+    }
+
+    /* --- Row 3: Keyboard layout --- */
+    {
+        int ry = sep_row + 24;
+
+        /* Keyboard icon (small rectangle with dots) */
+        draw_rect_rounded_outline(scr, fl, ry + 1, 14, 10, 2, 1, C_FOOTER);
+        /* Key dots inside */
+        draw_rect(scr, fl + 3, ry + 3, 2, 2, C_FOOTER);
+        draw_rect(scr, fl + 6, ry + 3, 2, 2, C_FOOTER);
+        draw_rect(scr, fl + 9, ry + 3, 2, 2, C_FOOTER);
+        /* Space bar */
+        draw_hline(scr, fl + 4, ry + 7, 6, C_FOOTER);
+
+        draw_string(scr, fl + 18, ry, "Keyboard: EN-US",
+                    C_FOOTER_HI, rgba(0,0,0,0));
+    }
 
     /* ── Decorative sparkles ────────────────────────────────────────── */
     draw_sparkle(scr, W - W * 7 / 100, H - H * 10 / 100, 22);
