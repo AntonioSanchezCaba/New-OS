@@ -739,38 +739,215 @@ static void draw_auth_button(canvas_t* scr, int x, int y, int w, int h)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * STATUS BAR ICONS (left side, bottom)
+ * STATUS BAR ICONS
+ *
+ * Reference layout (left to right):
+ *   WiFi | Signal Bars | separator | Drive | Arrows | Sync | sep | Shield
  * ═══════════════════════════════════════════════════════════════════════ */
 
-static void draw_wifi_icon(canvas_t* scr, int x, int y, uint32_t color)
+/* Safe pixel plot helper */
+static inline void px_blend(canvas_t* s, int x, int y, uint32_t c)
 {
-    /* Draw WiFi arcs using partial circle outlines */
-    /* Smallest arc */
-    draw_circle_filled(scr, x, y + 10, 2, color);
-    /* Medium arc - just draw pixel by pixel */
-    for (int a = -6; a <= 6; a++) {
-        int py = y + 7 - (6 - (a < 0 ? -a : a));
-        int px = x + a;
-        if ((unsigned)px < (unsigned)scr->width && (unsigned)py < (unsigned)scr->height)
-            scr->pixels[py * scr->stride + px] =
-                fb_blend(scr->pixels[py * scr->stride + px], color);
-    }
-    /* Large arc */
-    for (int a = -10; a <= 10; a++) {
-        int py = y + 4 - (10 - (a < 0 ? -a : a)) / 2;
-        int px = x + a;
-        if ((unsigned)px < (unsigned)scr->width && (unsigned)py < (unsigned)scr->height)
-            scr->pixels[py * scr->stride + px] =
-                fb_blend(scr->pixels[py * scr->stride + px], color);
+    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
+        s->pixels[y * s->stride + x] = fb_blend(s->pixels[y * s->stride + x], c);
+}
+static inline void px_set(canvas_t* s, int x, int y, uint32_t c)
+{
+    if ((unsigned)x < (unsigned)s->width && (unsigned)y < (unsigned)s->height)
+        s->pixels[y * s->stride + x] = c;
+}
+
+/* 1) WiFi icon – center dot + 3 concentric arcs (upper half only) */
+static void draw_icon_wifi(canvas_t* scr, int cx, int cy, uint32_t color)
+{
+    /* Base dot */
+    draw_circle_filled(scr, cx, cy + 6, 2, color);
+
+    /* Draw arcs as partial circles (upper 180°) using Bresenham-ish */
+    int radii[3] = { 6, 10, 14 };
+    for (int a = 0; a < 3; a++) {
+        int r = radii[a];
+        /* Walk the arc only for the upper-half, roughly -135° to -45° */
+        for (int dx = -r; dx <= r; dx++) {
+            int dy2 = r * r - dx * dx;
+            if (dy2 < 0) continue;
+            int dy = isqrt(dy2);
+            /* Only keep the top arc portion: |dx| < dy (upper 90° cone) */
+            if ((dx < 0 ? -dx : dx) > dy) continue;
+            /* Draw 2-pixel thick arc */
+            px_blend(scr, cx + dx, cy + 6 - dy, color);
+            px_blend(scr, cx + dx, cy + 6 - dy + 1, color);
+        }
     }
 }
 
-static void draw_signal_bars(canvas_t* scr, int x, int y, uint32_t color)
+/* 2) Signal bars – 5 ascending bars */
+static void draw_icon_signal(canvas_t* scr, int x, int y, uint32_t color)
 {
-    for (int i = 0; i < 4; i++) {
+    int total_h = 16;
+    int n_bars = 5;
+    for (int i = 0; i < n_bars; i++) {
         int bar_h = 4 + i * 3;
-        draw_rect(scr, x + i * 5, y + 14 - bar_h, 3, bar_h, color);
+        int bx = x + i * 5;
+        int by = y + total_h - bar_h;
+        draw_rect_rounded(scr, bx, by, 3, bar_h, 1, color);
     }
+}
+
+/* 3) Vertical separator bar */
+static void draw_icon_sep(canvas_t* scr, int x, int y, int h)
+{
+    draw_rect_alpha(scr, x, y, 1, h, rgba(0x40, 0x70, 0xA0, 0x50));
+}
+
+/* 4) Drive / storage icon – rounded rectangle with horizontal lines */
+static void draw_icon_drive(canvas_t* scr, int x, int y, uint32_t color)
+{
+    /* Drive body */
+    draw_rect_rounded(scr, x, y + 2, 20, 14, 3, color);
+    /* Inner cutout (dark) to make it look like an enclosure */
+    draw_rect(scr, x + 2, y + 5, 16, 8, C_BG_TOP);
+    /* Horizontal platter lines inside */
+    draw_hline(scr, x + 4, y + 7, 12, color);
+    draw_hline(scr, x + 4, y + 10, 12, color);
+    /* LED dot (bottom-right) */
+    draw_rect(scr, x + 16, y + 12, 2, 2, C_CLOCK);
+}
+
+/* 5) Data transfer arrows (up + down) */
+static void draw_icon_arrows(canvas_t* scr, int x, int y, uint32_t color)
+{
+    /* Up arrow */
+    int ux = x + 4, uy = y + 1;
+    /* Arrowhead */
+    for (int i = 0; i < 4; i++) {
+        draw_hline(scr, ux - i, uy + i, 2 * i + 1, color);
+    }
+    /* Shaft */
+    draw_rect(scr, ux - 1, uy + 4, 3, 5, color);
+
+    /* Down arrow */
+    int dx = x + 14, dy = y + 7;
+    /* Shaft */
+    draw_rect(scr, dx - 1, dy, 3, 5, color);
+    /* Arrowhead */
+    for (int i = 0; i < 4; i++) {
+        draw_hline(scr, dx - i, dy + 5 + i, 2 * i + 1, color);
+    }
+}
+
+/* 6) Sync / refresh circle (circular arrow) */
+static void draw_icon_sync(canvas_t* scr, int cx, int cy, uint32_t color)
+{
+    int r = 7;
+    /* Draw circle outline but leave a gap for the arrowhead */
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            /* Ring: between (r-1)^2 and r^2 */
+            if (d2 > r * r || d2 < (r - 2) * (r - 2)) continue;
+
+            /* Leave gap in bottom-right quadrant for arrow */
+            if (dx > 2 && dy > 0) continue;
+
+            px_set(scr, cx + dx, cy + dy, color);
+        }
+    }
+    /* Small arrowhead at gap end (pointing clockwise, i.e. right) */
+    int ax = cx + r - 1, ay = cy + 1;
+    for (int i = 0; i < 3; i++) {
+        px_set(scr, ax + i, ay, color);
+        if (i > 0) {
+            px_set(scr, ax, ay + i, color);
+            px_set(scr, ax, ay - i, color);
+        }
+    }
+}
+
+/* 7) Shield with checkmark */
+static void draw_icon_shield(canvas_t* scr, int x, int y, uint32_t color)
+{
+    int w = 18, h = 20;
+    int cx = x + w / 2;
+
+    /* Shield shape: rounded top, pointed bottom */
+    for (int row = 0; row < h; row++) {
+        int half_w;
+        if (row < 4) {
+            /* Top: slightly rounded */
+            half_w = w / 2 - (row == 0 ? 2 : (row == 1 ? 1 : 0));
+        } else if (row < h - 4) {
+            /* Middle: full width tapering slightly */
+            half_w = w / 2 - (row - h / 2 + 4) * 1 / 6;
+            if (half_w > w / 2) half_w = w / 2;
+        } else {
+            /* Bottom: taper to point */
+            int remaining = h - row;
+            half_w = remaining * (w / 2) / 5;
+        }
+        if (half_w < 0) half_w = 0;
+
+        int left = cx - half_w;
+        int right = cx + half_w;
+
+        /* Draw outline only (2px thick at sides) */
+        int py = y + row;
+        for (int px = left; px <= right; px++) {
+            bool is_edge = (px <= left + 1 || px >= right - 1 ||
+                            row <= 1 || row >= h - 2);
+            /* Fill the border band */
+            if (is_edge) {
+                px_set(scr, px, py, color);
+            }
+        }
+    }
+
+    /* Checkmark inside the shield */
+    /* Short stroke: going down-right */
+    draw_line(scr, cx - 4, y + 9, cx - 1, y + 12, color);
+    draw_line(scr, cx - 4, y + 10, cx - 1, y + 13, color);
+    /* Long stroke: going up-right */
+    draw_line(scr, cx - 1, y + 12, cx + 4, y + 7, color);
+    draw_line(scr, cx - 1, y + 13, cx + 4, y + 8, color);
+}
+
+/* Master function: draw all status indicators in a row */
+static void draw_status_indicators(canvas_t* scr, int x, int y,
+                                    uint32_t color)
+{
+    int cursor = x;
+    int icon_h = 18;
+
+    /* 1. WiFi */
+    draw_icon_wifi(scr, cursor + 10, y + 2, color);
+    cursor += 28;
+
+    /* 2. Signal bars */
+    draw_icon_signal(scr, cursor, y + 1, color);
+    cursor += 28;
+
+    /* separator */
+    draw_icon_sep(scr, cursor, y, icon_h);
+    cursor += 8;
+
+    /* 3. Drive */
+    draw_icon_drive(scr, cursor, y, color);
+    cursor += 26;
+
+    /* 4. Data transfer arrows */
+    draw_icon_arrows(scr, cursor, y, color);
+    cursor += 24;
+
+    /* 5. Sync circle */
+    draw_icon_sync(scr, cursor + 7, y + 9, color);
+    cursor += 22;
+
+    /* separator */
+    draw_icon_sep(scr, cursor, y, icon_h);
+    cursor += 8;
+
+    /* 6. Shield with checkmark */
+    draw_icon_shield(scr, cursor, y - 1, color);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -836,20 +1013,9 @@ static void draw_login_screen(canvas_t* scr)
                 "Device: AETHER-WS-01 | " OS_RELEASE " | Encrypted",
                 C_INFO_DIM, rgba(0,0,0,0));
 
-    /* ── Status icons ───────────────────────────────────────────────── */
+    /* ── Status indicators ──────────────────────────────────────────── */
     int icon_y = info_y + 50;
-    draw_wifi_icon(scr, left_margin + 10, icon_y, C_INFO);
-    draw_signal_bars(scr, left_margin + 30, icon_y, C_INFO);
-    draw_rect_alpha(scr, left_margin + 52, icon_y + 2, 1, 12,
-                    rgba(0x40, 0x60, 0x80, 0x50));
-    /* Secure shield indicator */
-    draw_circle_filled(scr, left_margin + 62, icon_y + 6, 4, C_INFO);
-    draw_rect(scr, left_margin + 58, icon_y + 9, 9, 5, C_INFO);
-    draw_rect(scr, left_margin + 61, icon_y + 7, 3, 3, C_BG_TOP);
-    draw_rect_alpha(scr, left_margin + 76, icon_y + 2, 1, 12,
-                    rgba(0x40, 0x60, 0x80, 0x50));
-    /* Refresh icon (simple) */
-    draw_circle(scr, left_margin + 88, icon_y + 7, 5, C_INFO);
+    draw_status_indicators(scr, left_margin, icon_y, C_INFO);
 
     /* ── RIGHT SIDE: Login card ─────────────────────────────────────── */
     int card_x = W - CARD_W - W * 10 / 100;
