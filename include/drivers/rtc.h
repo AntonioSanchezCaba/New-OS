@@ -23,7 +23,7 @@ typedef struct {
 /* Initialize the RTC driver (reads initial time) */
 void rtc_init(void);
 
-/* Read current time from CMOS RTC (UTC) and apply timezone offset */
+/* Read current time from CMOS RTC and apply timezone offset */
 void rtc_get_time(rtc_time_t* t);
 
 /* Set timezone offset in minutes from UTC (e.g. -300 for EST, +60 for CET) */
@@ -31,6 +31,10 @@ void rtc_set_tz_offset(int16_t offset_minutes);
 
 /* Get current timezone offset in minutes */
 int16_t rtc_get_tz_offset(void);
+
+/* Set/get whether the hardware RTC is in UTC (true) or local time (false) */
+void rtc_set_utc_hwclock(bool is_utc);
+bool rtc_get_utc_hwclock(void);
 
 /* Check if timezone has been configured (first-boot detection) */
 bool rtc_tz_configured(void);

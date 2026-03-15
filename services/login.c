@@ -140,11 +140,13 @@ static hitbox_t g_hit_eye;    /* password show/hide toggle */
 
 /* ── Timezone setup wizard state ─────────────────────────────────────── */
 #define TZ_WIZARD_NONE    0
-#define TZ_WIZARD_REGION  1   /* selecting region/continent */
-#define TZ_WIZARD_CITY    2   /* selecting city within region */
-#define TZ_WIZARD_DONE    3
+#define TZ_WIZARD_CLOCK   1   /* asking: is RTC UTC or local? */
+#define TZ_WIZARD_REGION  2   /* selecting region/continent */
+#define TZ_WIZARD_CITY    3   /* selecting city within region */
+#define TZ_WIZARD_DONE    4
 
 static int  g_tz_wizard = TZ_WIZARD_NONE;
+static int  g_tz_clock_sel   = 0;   /* 0=local, 1=UTC */
 static int  g_tz_region_sel  = 0;   /* cursor in region list */
 static int  g_tz_city_sel    = 0;   /* cursor in city list */
 
@@ -861,49 +863,73 @@ static void draw_password_field(canvas_t* scr, int x, int y, int w, int h,
     draw_rect_alpha(scr, sep_x, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x40));
 
-    /* ── Eye toggle icon (right side of field) ─────────────────── */
+    /* ── Eye toggle icon (right side of field, centered) ────── */
     {
-        int eye_x = x + w - 30;
+        int eye_zone = 36;  /* clickable zone width */
+        int eye_cx = x + w - eye_zone / 2;
         int eye_cy = y + h / 2;
-        uint32_t eye_col = g_show_password
-                           ? C_FIELD_FOCUS
-                           : rgba(0x50, 0x70, 0x90, 0xA0);
+        uint32_t c_on  = C_FIELD_FOCUS;              /* active blue */
+        uint32_t c_off = rgba(0x60, 0x80, 0xA0, 0xB0); /* dimmer */
+        uint32_t eye_col = g_show_password ? c_on : c_off;
 
-        /* Eye shape: almond/ellipse outline */
-        for (int dx = -8; dx <= 8; dx++) {
-            /* top and bottom curves of the eye */
-            int dy_top = (8 - (dx < 0 ? -dx : dx)) * 3 / 8;
-            int dy_bot = -dy_top;
-            if (dy_top < 1) dy_top = 1;
-            px_set(scr, eye_x + dx, eye_cy - dy_top, eye_col);
-            px_set(scr, eye_x + dx, eye_cy + (-dy_bot), eye_col);
-        }
-        /* Iris (filled circle) */
-        draw_circle_filled(scr, eye_x, eye_cy, 2, eye_col);
+        /* Draw almond-shaped eye using parametric curves.
+         * Upper lid:  y = -A * (1 - (x/R)^2)
+         * Lower lid:  y = +A * (1 - (x/R)^2)
+         * with R=10 (half-width) and A=5 (half-height) */
+        int R = 10, A = 5;
+        for (int dx = -R; dx <= R; dx++) {
+            /* Quadratic lid curves */
+            int frac = (R * R - dx * dx);  /* 0..R^2 */
+            int dy_lid = A * frac / (R * R);
+            if (dy_lid < 1 && (dx > -R && dx < R)) dy_lid = 1;
 
-        /* If password hidden, draw a slash through the eye */
-        if (!g_show_password) {
-            for (int i = -5; i <= 5; i++) {
-                int sx = eye_x + i;
-                int sy = eye_cy - i * 4 / 5;
-                if ((unsigned)sx < (unsigned)scr->width &&
-                    (unsigned)sy < (unsigned)scr->height)
-                    scr->pixels[sy * scr->stride + sx] = eye_col;
+            /* Top lid pixel */
+            int px_x = eye_cx + dx;
+            int py_top = eye_cy - dy_lid;
+            int py_bot = eye_cy + dy_lid;
+            if ((unsigned)px_x < (unsigned)scr->width) {
+                if ((unsigned)py_top < (unsigned)scr->height)
+                    scr->pixels[py_top * scr->stride + px_x] = eye_col;
+                if ((unsigned)py_bot < (unsigned)scr->height)
+                    scr->pixels[py_bot * scr->stride + px_x] = eye_col;
             }
         }
 
-        /* Store hitbox for click detection */
-        g_hit_eye = (hitbox_t){ eye_x - 12, y, 28, h };
+        /* Iris: filled circle radius 3 */
+        draw_circle_filled(scr, eye_cx, eye_cy, 3, eye_col);
+        /* Pupil: dark dot */
+        draw_circle_filled(scr, eye_cx, eye_cy, 1,
+                           rgba(0x10, 0x18, 0x28, 0xFF));
+        /* Iris ring */
+        draw_circle(scr, eye_cx, eye_cy, 3, eye_col);
+
+        /* Diagonal slash when hidden */
+        if (!g_show_password) {
+            for (int i = -8; i <= 8; i++) {
+                int sx = eye_cx + i;
+                int sy = eye_cy - (i * 6) / 8;
+                /* Draw 2px wide for visibility */
+                for (int t = 0; t <= 1; t++) {
+                    int px_sx = sx + t;
+                    if ((unsigned)px_sx < (unsigned)scr->width &&
+                        (unsigned)sy < (unsigned)scr->height)
+                        scr->pixels[sy * scr->stride + px_sx] = eye_col;
+                }
+            }
+        }
+
+        /* Store hitbox */
+        g_hit_eye = (hitbox_t){ eye_cx - eye_zone / 2, y, eye_zone, h };
     }
 
     /* ── Vertical separator before eye icon ──────────────────── */
-    draw_rect_alpha(scr, x + w - 40, y + 6, 1, h - 12,
+    draw_rect_alpha(scr, x + w - 36, y + 6, 1, h - 12,
                     rgba(0x40, 0x70, 0xA0, 0x30));
 
-    /* ── Content area (right of separator, left of eye icon) ── */
+    /* ── Content area (right of separator, left of eye zone) ── */
     int tx = sep_x + 10;
     int ty = y + (h - FONT_H) / 2;
-    int max_content_w = w - 40 - (sep_x - x) - 14; /* space for text */
+    int max_content_w = w - 36 - (sep_x - x) - 10; /* text area width */
     int max_chars = max_content_w / 8;                /* ~8px per char */
     if (max_chars > 24) max_chars = 24;
 
@@ -1237,16 +1263,69 @@ static void draw_status_indicators(canvas_t* scr, int x, int y,
 static void draw_tz_wizard(canvas_t* scr)
 {
     int W = scr->width, H = scr->height;
+
+    /* Clock step uses a smaller card */
+    int wiz_h = (g_tz_wizard == TZ_WIZARD_CLOCK) ? 220 : WIZ_H;
     int wx = (W - WIZ_W) / 2;
-    int wy = (H - WIZ_H) / 2;
+    int wy = (H - wiz_h) / 2;
 
     /* Dim background */
     draw_rect_alpha(scr, 0, 0, W, H, rgba(0, 0, 0, 0x80));
 
     /* Wizard card */
-    draw_glass_card(scr, wx, wy, WIZ_W, WIZ_H, WIZ_RADIUS);
+    draw_glass_card(scr, wx, wy, WIZ_W, wiz_h, WIZ_RADIUS);
 
-    /* Title bar */
+    /* ── Step 0: Clock source ──────────────────────────────────── */
+    if (g_tz_wizard == TZ_WIZARD_CLOCK) {
+        const char* title = "Hardware Clock Setting";
+        int tw_val = draw_string_width(title);
+        draw_string(scr, wx + (WIZ_W - tw_val) / 2, wy + WIZ_PAD,
+                    title, C_NAME, rgba(0,0,0,0));
+
+        const char* sub = "How is your computer's clock configured?";
+        int sw_val = draw_string_width(sub);
+        draw_string(scr, wx + (WIZ_W - sw_val) / 2, wy + WIZ_PAD + 20,
+                    sub, C_SUBTEXT, rgba(0,0,0,0));
+
+        draw_rect_alpha(scr, wx + WIZ_PAD, wy + WIZ_PAD + 42,
+                        WIZ_W - 2 * WIZ_PAD, 1,
+                        rgba(0x40, 0x60, 0x80, 0x30));
+
+        /* Two options */
+        static const char* clk_opts[] = {
+            "Local time (Windows / VirtualBox default)",
+            "UTC (Linux / manual setup)",
+        };
+        int ly = wy + WIZ_PAD + 56;
+        int lx = wx + WIZ_PAD;
+        int lw = WIZ_W - 2 * WIZ_PAD;
+
+        for (int i = 0; i < 2; i++) {
+            int iy = ly + i * 36;
+            bool is_sel = (i == g_tz_clock_sel);
+            if (is_sel) {
+                draw_rect_alpha(scr, lx, iy, lw, 28,
+                                rgba(0x30, 0x70, 0xB0, 0x60));
+                draw_rect_rounded_outline(scr, lx, iy, lw, 28,
+                                           4, 1, C_FIELD_FOCUS);
+            }
+            /* Radio circle */
+            draw_circle(scr, lx + 14, iy + 14, 5, is_sel ? C_NAME : C_TEXT);
+            if (is_sel)
+                draw_circle_filled(scr, lx + 14, iy + 14, 2, C_FIELD_FOCUS);
+
+            draw_string(scr, lx + 28, iy + 6, clk_opts[i],
+                        is_sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
+        }
+
+        const char* hint = "Use Up/Down + Enter. Esc = skip (local)";
+        int hw = draw_string_width(hint);
+        draw_string(scr, wx + (WIZ_W - hw) / 2, wy + wiz_h - WIZ_PAD - 14,
+                    hint, C_INFO, rgba(0,0,0,0));
+        return;
+    }
+
+    /* ── Steps 1 & 2: Region / City list ───────────────────────── */
     const char* title;
     const char* subtitle;
     if (g_tz_wizard == TZ_WIZARD_REGION) {
@@ -1257,11 +1336,11 @@ static void draw_tz_wizard(canvas_t* scr)
         subtitle = "Press Esc to go back";
     }
 
-    int tw = draw_string_width(title);
-    draw_string(scr, wx + (WIZ_W - tw) / 2, wy + WIZ_PAD,
+    int tw_val = draw_string_width(title);
+    draw_string(scr, wx + (WIZ_W - tw_val) / 2, wy + WIZ_PAD,
                 title, C_NAME, rgba(0,0,0,0));
-    int sw = draw_string_width(subtitle);
-    draw_string(scr, wx + (WIZ_W - sw) / 2, wy + WIZ_PAD + 20,
+    int sw_val = draw_string_width(subtitle);
+    draw_string(scr, wx + (WIZ_W - sw_val) / 2, wy + WIZ_PAD + 20,
                 subtitle, C_SUBTEXT, rgba(0,0,0,0));
 
     /* Separator */
@@ -1284,7 +1363,7 @@ static void draw_tz_wizard(canvas_t* scr)
     }
 
     /* Calculate scroll offset to keep selection visible */
-    int max_visible = (WIZ_H - WIZ_PAD - 50 - WIZ_PAD) / WIZ_ITEM_H;
+    int max_visible = (wiz_h - WIZ_PAD - 50 - WIZ_PAD) / WIZ_ITEM_H;
     int scroll = 0;
     if (sel >= max_visible) scroll = sel - max_visible + 1;
     if (scroll > count - max_visible) scroll = count - max_visible;
@@ -1295,7 +1374,6 @@ static void draw_tz_wizard(canvas_t* scr)
         bool is_sel = (i == sel);
 
         if (is_sel) {
-            /* Selection highlight */
             draw_rect_alpha(scr, list_x, iy, list_w, WIZ_ITEM_H - 2,
                             rgba(0x30, 0x70, 0xB0, 0x60));
             draw_rect_rounded_outline(scr, list_x, iy, list_w, WIZ_ITEM_H - 2,
@@ -1657,7 +1735,7 @@ static void draw_login_screen(canvas_t* scr)
                 C_INFO, rgba(0,0,0,0));
 
     /* ── Timezone wizard overlay (if active) ─────────────────────────── */
-    if (g_tz_wizard == TZ_WIZARD_REGION || g_tz_wizard == TZ_WIZARD_CITY)
+    if (g_tz_wizard >= TZ_WIZARD_CLOCK && g_tz_wizard <= TZ_WIZARD_CITY)
         draw_tz_wizard(scr);
 }
 
@@ -1698,7 +1776,8 @@ void login_run(void)
 
     /* If timezone not yet configured, launch the setup wizard */
     if (!rtc_tz_configured()) {
-        g_tz_wizard = TZ_WIZARD_REGION;
+        g_tz_wizard = TZ_WIZARD_CLOCK;
+        g_tz_clock_sel = 0;
         g_tz_region_sel = 0;
         g_tz_city_sel = 0;
     } else {
@@ -1723,8 +1802,26 @@ void login_run(void)
         if (got_key && kdown) {
 
             /* --- Timezone wizard keyboard handling --- */
-            if (g_tz_wizard == TZ_WIZARD_REGION ||
-                g_tz_wizard == TZ_WIZARD_CITY) {
+            if (g_tz_wizard == TZ_WIZARD_CLOCK) {
+                /* Clock source step: local vs UTC */
+                if (kc == KEY_UP_ARROW || ch == 'k' || ch == 'K') {
+                    g_tz_clock_sel = 0;
+                } else if (kc == KEY_DOWN_ARROW || ch == 'j' || ch == 'J') {
+                    g_tz_clock_sel = 1;
+                } else if (ch == '\n' || ch == '\r') {
+                    rtc_set_utc_hwclock(g_tz_clock_sel == 1);
+                    g_tz_wizard = TZ_WIZARD_REGION;
+                    g_tz_region_sel = 0;
+                } else if (kc == 0x1B) {
+                    /* Esc = skip, default to local time */
+                    rtc_set_utc_hwclock(false);
+                    rtc_set_tz_offset(0);
+                    rtc_set_tz_configured(true);
+                    g_tz_wizard = TZ_WIZARD_NONE;
+                }
+
+            } else if (g_tz_wizard == TZ_WIZARD_REGION ||
+                       g_tz_wizard == TZ_WIZARD_CITY) {
 
                 int count;
                 int* sel;
@@ -1741,10 +1838,7 @@ void login_run(void)
                         g_tz_wizard = TZ_WIZARD_REGION;
                         g_tz_city_sel = 0;
                     } else {
-                        /* Skip timezone setup (use UTC) */
-                        rtc_set_tz_offset(0);
-                        rtc_set_tz_configured(true);
-                        g_tz_wizard = TZ_WIZARD_NONE;
+                        g_tz_wizard = TZ_WIZARD_CLOCK;
                     }
                 } else if (kc == KEY_UP_ARROW || ch == 'k' || ch == 'K') {
                     if (*sel > 0) (*sel)--;

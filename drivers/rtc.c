@@ -2,7 +2,8 @@
  * drivers/rtc.c - CMOS Real-Time Clock driver
  *
  * Reads date/time from the MC146818 RTC chip via CMOS ports 0x70/0x71.
- * The RTC keeps time in UTC; we apply a configurable timezone offset.
+ * Supports both UTC and local-time hardware clocks (common on VirtualBox
+ * running on Windows where the RTC mirrors the host's local time).
  */
 #include <drivers/rtc.h>
 #include <kernel.h>
@@ -26,19 +27,23 @@
 
 /*
  * CMOS NVRAM persistence for timezone settings.
- * We use three otherwise-unused CMOS registers:
+ * We use four otherwise-unused CMOS registers:
  *   0x38: magic byte (0xAE = "AEtherOS timezone set")
  *   0x39: timezone offset high byte  (int16_t big-endian)
  *   0x3A: timezone offset low byte
+ *   0x3B: flags — bit 0: RTC is UTC (1) or local time (0)
  */
 #define CMOS_TZ_MAGIC   0x38
 #define CMOS_TZ_HI      0x39
 #define CMOS_TZ_LO      0x3A
+#define CMOS_TZ_FLAGS   0x3B
 #define TZ_MAGIC_VALUE  0xAE
+#define TZ_FLAG_UTC     0x01
 
 /* State */
-static int16_t g_tz_offset = 0;      /* minutes from UTC */
+static int16_t g_tz_offset    = 0;     /* minutes: desired_tz from UTC */
 static bool    g_tz_configured = false;
+static bool    g_rtc_is_utc   = false; /* true if hardware clock is UTC */
 
 /* Read a single CMOS register */
 static uint8_t cmos_read(uint8_t reg)
@@ -56,22 +61,25 @@ static void cmos_write(uint8_t reg, uint8_t val)
     outb(CMOS_DATA, val);
 }
 
-/* Save timezone offset to CMOS NVRAM (persists across reboots) */
-static void cmos_save_tz(int16_t offset)
+/* Save all timezone settings to CMOS NVRAM */
+static void cmos_save_all(void)
 {
     cmos_write(CMOS_TZ_MAGIC, TZ_MAGIC_VALUE);
-    cmos_write(CMOS_TZ_HI, (uint8_t)((uint16_t)offset >> 8));
-    cmos_write(CMOS_TZ_LO, (uint8_t)((uint16_t)offset & 0xFF));
+    cmos_write(CMOS_TZ_HI, (uint8_t)((uint16_t)g_tz_offset >> 8));
+    cmos_write(CMOS_TZ_LO, (uint8_t)((uint16_t)g_tz_offset & 0xFF));
+    cmos_write(CMOS_TZ_FLAGS, g_rtc_is_utc ? TZ_FLAG_UTC : 0);
 }
 
-/* Load timezone offset from CMOS NVRAM. Returns true if valid. */
-static bool cmos_load_tz(int16_t* offset)
+/* Load timezone settings from CMOS NVRAM. Returns true if valid. */
+static bool cmos_load_all(void)
 {
     if (cmos_read(CMOS_TZ_MAGIC) != TZ_MAGIC_VALUE)
         return false;
     uint8_t hi = cmos_read(CMOS_TZ_HI);
     uint8_t lo = cmos_read(CMOS_TZ_LO);
-    *offset = (int16_t)((uint16_t)hi << 8 | lo);
+    uint8_t fl = cmos_read(CMOS_TZ_FLAGS);
+    g_tz_offset  = (int16_t)((uint16_t)hi << 8 | lo);
+    g_rtc_is_utc = (fl & TZ_FLAG_UTC) != 0;
     return true;
 }
 
@@ -115,12 +123,11 @@ static uint8_t calc_weekday(uint16_t y, uint8_t m, uint8_t d)
 void rtc_init(void)
 {
     /* Try to restore timezone from CMOS NVRAM */
-    int16_t saved_offset;
-    if (cmos_load_tz(&saved_offset)) {
-        g_tz_offset = saved_offset;
+    if (cmos_load_all()) {
         g_tz_configured = true;
     } else {
-        g_tz_offset = 0;
+        g_tz_offset    = 0;
+        g_rtc_is_utc   = false; /* default: assume local time (VirtualBox) */
         g_tz_configured = false;
     }
 }
@@ -178,8 +185,19 @@ void rtc_get_time(rtc_time_t* t)
         full_year = 2000 + year;
     }
 
-    /* Apply timezone offset */
-    int total_min = (int)hour * 60 + (int)min + (int)g_tz_offset;
+    /*
+     * Apply timezone offset.
+     *
+     * If RTC is UTC:   local_time = RTC + tz_offset
+     * If RTC is local: local_time = RTC  (offset = 0 effectively,
+     *                  the tz_offset is only stored for display label)
+     *
+     * When RTC is local time (VirtualBox/Windows), the hardware already
+     * shows the correct local time, so we don't apply any arithmetic
+     * offset — the stored tz_offset is only used for the UTC label.
+     */
+    int apply_offset = g_rtc_is_utc ? (int)g_tz_offset : 0;
+    int total_min = (int)hour * 60 + (int)min + apply_offset;
 
     /* Handle day rollover from timezone */
     int day_delta = 0;
@@ -225,12 +243,23 @@ void rtc_get_time(rtc_time_t* t)
 void rtc_set_tz_offset(int16_t offset_minutes)
 {
     g_tz_offset = offset_minutes;
-    cmos_save_tz(offset_minutes);
+    cmos_save_all();
 }
 
 int16_t rtc_get_tz_offset(void)
 {
     return g_tz_offset;
+}
+
+void rtc_set_utc_hwclock(bool is_utc)
+{
+    g_rtc_is_utc = is_utc;
+    cmos_save_all();
+}
+
+bool rtc_get_utc_hwclock(void)
+{
+    return g_rtc_is_utc;
 }
 
 bool rtc_tz_configured(void)
