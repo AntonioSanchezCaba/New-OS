@@ -143,6 +143,7 @@ C_SRCS := \
     drivers/mouse.c             \
     drivers/pci.c               \
     drivers/e1000.c             \
+    drivers/rtc.c               \
     process/process.c           \
     scheduler/scheduler.c       \
     syscall/syscall.c           \
@@ -173,6 +174,7 @@ C_SRCS := \
     kernel/ipc.c                \
     kernel/svcbus.c             \
     kernel/secmon.c             \
+    kernel/power.c              \
     mm/buddy.c                  \
     display/compositor.c        \
     input/input_svc.c           \

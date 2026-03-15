@@ -11,17 +11,23 @@
  */
 #include <services/login.h>
 #include <kernel/version.h>
+#include <kernel/power.h>
 #include <gui/draw.h>
 #include <gui/theme.h>
 #include <drivers/framebuffer.h>
 #include <drivers/keyboard.h>
 #include <drivers/timer.h>
+#include <drivers/rtc.h>
 #include <drivers/mouse.h>
 #include <drivers/cursor.h>
 #include <scheduler.h>
 #include <kernel/users.h>
 #include <string.h>
 #include <memory.h>
+
+/* Arrow key keycodes from gui/event.h (avoid include to prevent type conflicts) */
+#define KEY_UP_ARROW   0x100
+#define KEY_DOWN_ARROW 0x101
 
 char login_username[64] = "user";
 
@@ -121,6 +127,123 @@ static bool     g_cursor_vis = true;
 /* Cached hit-test positions */
 static int g_field_x, g_field_y;
 static int g_btn_x, g_btn_y;
+
+/* Footer button hit-test rectangles */
+typedef struct { int x, y, w, h; } hitbox_t;
+static hitbox_t g_hit_shutdown;
+static hitbox_t g_hit_restart;
+static hitbox_t g_hit_sleep;
+
+/* ── Timezone setup wizard state ─────────────────────────────────────── */
+#define TZ_WIZARD_NONE    0
+#define TZ_WIZARD_REGION  1   /* selecting region/continent */
+#define TZ_WIZARD_CITY    2   /* selecting city within region */
+#define TZ_WIZARD_DONE    3
+
+static int  g_tz_wizard = TZ_WIZARD_NONE;
+static int  g_tz_region_sel  = 0;   /* cursor in region list */
+static int  g_tz_city_sel    = 0;   /* cursor in city list */
+
+/* Timezone database: region -> city list with UTC offset in minutes */
+typedef struct { const char* name; int16_t offset; } tz_city_t;
+typedef struct {
+    const char* name;
+    const tz_city_t* cities;
+    int count;
+} tz_region_t;
+
+static const tz_city_t tz_americas[] = {
+    { "New York (EST)",     -300 },
+    { "Chicago (CST)",      -360 },
+    { "Denver (MST)",       -420 },
+    { "Los Angeles (PST)",  -480 },
+    { "Anchorage (AKST)",   -540 },
+    { "Honolulu (HST)",     -600 },
+    { "Sao Paulo (BRT)",    -180 },
+    { "Buenos Aires (ART)", -180 },
+    { "Mexico City (CST)",  -360 },
+    { "Bogota (COT)",       -300 },
+};
+
+static const tz_city_t tz_europe[] = {
+    { "London (GMT)",          0 },
+    { "Paris (CET)",         +60 },
+    { "Berlin (CET)",        +60 },
+    { "Madrid (CET)",        +60 },
+    { "Rome (CET)",          +60 },
+    { "Moscow (MSK)",       +180 },
+    { "Istanbul (TRT)",     +180 },
+    { "Athens (EET)",       +120 },
+    { "Warsaw (CET)",        +60 },
+    { "Amsterdam (CET)",     +60 },
+};
+
+static const tz_city_t tz_asia[] = {
+    { "Tokyo (JST)",        +540 },
+    { "Shanghai (CST)",     +480 },
+    { "Hong Kong (HKT)",    +480 },
+    { "Singapore (SGT)",    +480 },
+    { "Mumbai (IST)",       +330 },
+    { "Dubai (GST)",        +240 },
+    { "Seoul (KST)",        +540 },
+    { "Bangkok (ICT)",      +420 },
+    { "Taipei (CST)",       +480 },
+    { "Jakarta (WIB)",      +420 },
+};
+
+static const tz_city_t tz_africa[] = {
+    { "Cairo (EET)",        +120 },
+    { "Lagos (WAT)",         +60 },
+    { "Nairobi (EAT)",      +180 },
+    { "Johannesburg (SAST)",+120 },
+    { "Casablanca (WET)",      0 },
+};
+
+static const tz_city_t tz_oceania[] = {
+    { "Sydney (AEST)",      +600 },
+    { "Melbourne (AEST)",   +600 },
+    { "Auckland (NZST)",    +720 },
+    { "Perth (AWST)",       +480 },
+    { "Fiji (FJT)",         +720 },
+};
+
+static const tz_city_t tz_utc[] = {
+    { "UTC+0",     0 },
+    { "UTC+1",   +60 },
+    { "UTC+2",  +120 },
+    { "UTC+3",  +180 },
+    { "UTC+4",  +240 },
+    { "UTC+5",  +300 },
+    { "UTC+6",  +360 },
+    { "UTC+7",  +420 },
+    { "UTC+8",  +480 },
+    { "UTC+9",  +540 },
+    { "UTC+10", +600 },
+    { "UTC+11", +660 },
+    { "UTC+12", +720 },
+    { "UTC-1",   -60 },
+    { "UTC-2",  -120 },
+    { "UTC-3",  -180 },
+    { "UTC-4",  -240 },
+    { "UTC-5",  -300 },
+    { "UTC-6",  -360 },
+    { "UTC-7",  -420 },
+    { "UTC-8",  -480 },
+    { "UTC-9",  -540 },
+    { "UTC-10", -600 },
+    { "UTC-11", -660 },
+    { "UTC-12", -720 },
+};
+
+#define TZ_REGION_COUNT 6
+static const tz_region_t tz_regions[TZ_REGION_COUNT] = {
+    { "Americas", tz_americas, 10 },
+    { "Europe",   tz_europe,   10 },
+    { "Asia",     tz_asia,     10 },
+    { "Africa",   tz_africa,    5 },
+    { "Oceania",  tz_oceania,   5 },
+    { "Manual UTC Offset", tz_utc, 25 },
+};
 
 /* ── Helper: integer square root ──────────────────────────────────────── */
 static int isqrt(int n)
@@ -998,6 +1121,134 @@ static void draw_status_indicators(canvas_t* scr, int x, int y,
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+ * TIMEZONE SETUP WIZARD OVERLAY
+ *
+ * macOS/Windows-style first-boot experience:
+ *   Step 1: "Select your region"   -> list of continents
+ *   Step 2: "Select your city"     -> list of cities with UTC offsets
+ *   Navigate with arrow keys, Enter to confirm, Esc to go back.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+#define WIZ_W    420
+#define WIZ_H    380
+#define WIZ_RADIUS 16
+#define WIZ_ITEM_H  22
+#define WIZ_PAD     24
+
+static void draw_tz_wizard(canvas_t* scr)
+{
+    int W = scr->width, H = scr->height;
+    int wx = (W - WIZ_W) / 2;
+    int wy = (H - WIZ_H) / 2;
+
+    /* Dim background */
+    draw_rect_alpha(scr, 0, 0, W, H, rgba(0, 0, 0, 0x80));
+
+    /* Wizard card */
+    draw_glass_card(scr, wx, wy, WIZ_W, WIZ_H, WIZ_RADIUS);
+
+    /* Title bar */
+    const char* title;
+    const char* subtitle;
+    if (g_tz_wizard == TZ_WIZARD_REGION) {
+        title = "Select Your Region";
+        subtitle = "Use Up/Down arrows and Enter to select";
+    } else {
+        title = "Select Your City";
+        subtitle = "Press Esc to go back";
+    }
+
+    int tw = draw_string_width(title);
+    draw_string(scr, wx + (WIZ_W - tw) / 2, wy + WIZ_PAD,
+                title, C_NAME, rgba(0,0,0,0));
+    int sw = draw_string_width(subtitle);
+    draw_string(scr, wx + (WIZ_W - sw) / 2, wy + WIZ_PAD + 20,
+                subtitle, C_SUBTEXT, rgba(0,0,0,0));
+
+    /* Separator */
+    draw_rect_alpha(scr, wx + WIZ_PAD, wy + WIZ_PAD + 42,
+                    WIZ_W - 2 * WIZ_PAD, 1,
+                    rgba(0x40, 0x60, 0x80, 0x30));
+
+    /* List items */
+    int list_y = wy + WIZ_PAD + 50;
+    int list_x = wx + WIZ_PAD;
+    int list_w = WIZ_W - 2 * WIZ_PAD;
+
+    int count, sel;
+    if (g_tz_wizard == TZ_WIZARD_REGION) {
+        count = TZ_REGION_COUNT;
+        sel = g_tz_region_sel;
+    } else {
+        count = tz_regions[g_tz_region_sel].count;
+        sel = g_tz_city_sel;
+    }
+
+    /* Calculate scroll offset to keep selection visible */
+    int max_visible = (WIZ_H - WIZ_PAD - 50 - WIZ_PAD) / WIZ_ITEM_H;
+    int scroll = 0;
+    if (sel >= max_visible) scroll = sel - max_visible + 1;
+    if (scroll > count - max_visible) scroll = count - max_visible;
+    if (scroll < 0) scroll = 0;
+
+    for (int i = scroll; i < count && (i - scroll) < max_visible; i++) {
+        int iy = list_y + (i - scroll) * WIZ_ITEM_H;
+        bool is_sel = (i == sel);
+
+        if (is_sel) {
+            /* Selection highlight */
+            draw_rect_alpha(scr, list_x, iy, list_w, WIZ_ITEM_H - 2,
+                            rgba(0x30, 0x70, 0xB0, 0x60));
+            draw_rect_rounded_outline(scr, list_x, iy, list_w, WIZ_ITEM_H - 2,
+                                       4, 1, C_FIELD_FOCUS);
+        }
+
+        const char* item_name;
+        if (g_tz_wizard == TZ_WIZARD_REGION) {
+            item_name = tz_regions[i].name;
+        } else {
+            item_name = tz_regions[g_tz_region_sel].cities[i].name;
+        }
+
+        draw_string(scr, list_x + 10, iy + 2, item_name,
+                    is_sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
+
+        /* Show UTC offset for city list */
+        if (g_tz_wizard == TZ_WIZARD_CITY) {
+            int16_t off = tz_regions[g_tz_region_sel].cities[i].offset;
+            char offstr[12];
+            int oi = 0;
+            offstr[oi++] = 'U'; offstr[oi++] = 'T'; offstr[oi++] = 'C';
+            if (off >= 0) offstr[oi++] = '+';
+            else { offstr[oi++] = '-'; off = -off; }
+            int oh = off / 60, om = off % 60;
+            if (oh >= 10) offstr[oi++] = '0' + (char)(oh / 10);
+            offstr[oi++] = '0' + (char)(oh % 10);
+            if (om > 0) {
+                offstr[oi++] = ':';
+                offstr[oi++] = '0' + (char)(om / 10);
+                offstr[oi++] = '0' + (char)(om % 10);
+            }
+            offstr[oi] = '\0';
+            int ow = draw_string_width(offstr);
+            draw_string(scr, list_x + list_w - ow - 10, iy + 2,
+                        offstr, C_INFO, rgba(0,0,0,0));
+        }
+    }
+
+    /* Scroll indicators */
+    if (scroll > 0) {
+        draw_string(scr, wx + WIZ_W / 2 - 4, list_y - 12,
+                    "^", C_INFO, rgba(0,0,0,0));
+    }
+    if (scroll + max_visible < count) {
+        int bot = list_y + max_visible * WIZ_ITEM_H;
+        draw_string(scr, wx + WIZ_W / 2 - 4, bot,
+                    "v", C_INFO, rgba(0,0,0,0));
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
  * MAIN LOGIN SCREEN RENDERER
  * ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1017,35 +1268,41 @@ static void draw_login_screen(canvas_t* scr)
     draw_glow(scr, W * 68 / 100, H * 42 / 100, H * 35 / 100,
               0x20, 0x50, 0x80, 12);
 
-    /* ── Time calculation ───────────────────────────────────────────── */
-    uint32_t secs = timer_get_ticks() / TIMER_FREQ;
-    uint32_t hours   = (secs / 3600) % 24;
-    uint32_t minutes = (secs / 60) % 60;
-    uint32_t seconds = secs % 60;
+    /* ── Real-time clock from CMOS RTC ─────────────────────────────── */
+    rtc_time_t now_time;
+    rtc_get_time(&now_time);
+    int hours   = now_time.hour;
+    int minutes = now_time.minute;
+    int seconds = now_time.second;
 
     /* ── LEFT SIDE: Clock ───────────────────────────────────────────── */
     int left_margin = W * 8 / 100;
     int clock_y = H * 22 / 100;
 
-    draw_clock(scr, left_margin, clock_y, (int)hours, (int)minutes,
+    draw_clock(scr, left_margin, clock_y, hours, minutes,
                (seconds % 2) == 0);
 
-    /* ── Date line ──────────────────────────────────────────────────── */
+    /* ── Date line (from RTC) ───────────────────────────────────────── */
     int date_y = clock_y + DIGIT_H + 20;
     static const char* day_names[] = {
-        "THU", "FRI", "SAT", "SUN", "MON", "TUE", "WED"
+        "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"
     };
-    uint32_t day_idx = (secs / 86400) % 7;
 
-    /* Date at 2x scale with AA */
+    /* Format: YYYY.MM.DD  DAY */
     char date_str[20];
-    date_str[0] = '2'; date_str[1] = '0'; date_str[2] = '2'; date_str[3] = '6';
-    date_str[4] = '.';
-    date_str[5] = '0'; date_str[6] = '3';
-    date_str[7] = '.';
-    date_str[8] = '1'; date_str[9] = '5';
-    date_str[10] = ' '; date_str[11] = ' ';
-    const char* dn = day_names[day_idx];
+    date_str[0]  = '0' + (char)(now_time.year / 1000);
+    date_str[1]  = '0' + (char)((now_time.year / 100) % 10);
+    date_str[2]  = '0' + (char)((now_time.year / 10) % 10);
+    date_str[3]  = '0' + (char)(now_time.year % 10);
+    date_str[4]  = '.';
+    date_str[5]  = '0' + (char)(now_time.month / 10);
+    date_str[6]  = '0' + (char)(now_time.month % 10);
+    date_str[7]  = '.';
+    date_str[8]  = '0' + (char)(now_time.day / 10);
+    date_str[9]  = '0' + (char)(now_time.day % 10);
+    date_str[10] = ' ';
+    date_str[11] = ' ';
+    const char* dn = day_names[now_time.weekday % 7];
     date_str[12] = dn[0]; date_str[13] = dn[1]; date_str[14] = dn[2];
     date_str[15] = '\0';
 
@@ -1082,14 +1339,42 @@ static void draw_login_screen(canvas_t* scr)
     draw_string_scaled_aa(scr, name_x, name_y, login_username, 2, C_NAME);
 
     char login_info[64];
-    strncpy(login_info, "Last Login: 2026.03.15 ", 63);
-    char ts[16];
-    ts[0] = '0' + (char)(hours / 10); ts[1] = '0' + (char)(hours % 10);
-    ts[2] = ':';
-    ts[3] = '0' + (char)(minutes / 10); ts[4] = '0' + (char)(minutes % 10);
-    ts[5] = ' '; ts[6] = 'U'; ts[7] = 'T'; ts[8] = 'C'; ts[9] = '\0';
-    strncat(login_info, ts, 63 - strlen(login_info));
-    login_info[63] = '\0';
+    /* Build "Last Login: YYYY.MM.DD HH:MM TZ" */
+    int li = 0;
+    const char* prefix = "Last Login: ";
+    while (*prefix) login_info[li++] = *prefix++;
+    /* Date */
+    login_info[li++] = date_str[0]; login_info[li++] = date_str[1];
+    login_info[li++] = date_str[2]; login_info[li++] = date_str[3];
+    login_info[li++] = '.';
+    login_info[li++] = date_str[5]; login_info[li++] = date_str[6];
+    login_info[li++] = '.';
+    login_info[li++] = date_str[8]; login_info[li++] = date_str[9];
+    login_info[li++] = ' ';
+    login_info[li++] = '0' + (char)(hours / 10);
+    login_info[li++] = '0' + (char)(hours % 10);
+    login_info[li++] = ':';
+    login_info[li++] = '0' + (char)(minutes / 10);
+    login_info[li++] = '0' + (char)(minutes % 10);
+    login_info[li++] = ' ';
+    /* Timezone label */
+    int16_t tz = rtc_get_tz_offset();
+    if (tz == 0) {
+        login_info[li++] = 'U'; login_info[li++] = 'T'; login_info[li++] = 'C';
+    } else {
+        login_info[li++] = 'U'; login_info[li++] = 'T'; login_info[li++] = 'C';
+        login_info[li++] = (tz > 0) ? '+' : '-';
+        int abs_h = (tz < 0 ? -tz : tz) / 60;
+        int abs_m = (tz < 0 ? -tz : tz) % 60;
+        if (abs_h >= 10) login_info[li++] = '0' + (char)(abs_h / 10);
+        login_info[li++] = '0' + (char)(abs_h % 10);
+        if (abs_m > 0) {
+            login_info[li++] = ':';
+            login_info[li++] = '0' + (char)(abs_m / 10);
+            login_info[li++] = '0' + (char)(abs_m % 10);
+        }
+    }
+    login_info[li] = '\0';
     draw_string(scr, name_x, name_y + 36, login_info, C_SUBTEXT, rgba(0,0,0,0));
 
     /* Separator */
@@ -1163,7 +1448,7 @@ static void draw_login_screen(canvas_t* scr)
     draw_rect_alpha(scr, fl, sep_row, fr - fl, 1,
                     rgba(0x40, 0x60, 0x80, 0x30));
 
-    /* --- Row 2: Power | Accessibility | Network --- */
+    /* --- Row 2: Shutdown / Restart / Sleep | Accessibility | Network --- */
     {
         int ry = sep_row + 6;
         int cx_pos = fl;
@@ -1173,9 +1458,30 @@ static void draw_login_screen(canvas_t* scr)
         draw_vline(scr, cx_pos + 6, ry + 1, 5, C_FOOTER);
         cx_pos += 16;
 
-        draw_string(scr, cx_pos, ry + 1, "Shutdown / Restart / Sleep",
-                    C_FOOTER_HI, rgba(0,0,0,0));
-        cx_pos += draw_string_width("Shutdown / Restart / Sleep") + 12;
+        /* Draw "Shutdown", " / ", "Restart", " / ", "Sleep" separately
+         * and record hitboxes for each clickable word */
+        int tw;
+
+        tw = draw_string_width("Shutdown");
+        draw_string(scr, cx_pos, ry + 1, "Shutdown", C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_shutdown = (hitbox_t){ cx_pos, ry, tw, 16 };
+        cx_pos += tw;
+
+        draw_string(scr, cx_pos, ry + 1, " / ", C_FOOTER, rgba(0,0,0,0));
+        cx_pos += draw_string_width(" / ");
+
+        tw = draw_string_width("Restart");
+        draw_string(scr, cx_pos, ry + 1, "Restart", C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_restart = (hitbox_t){ cx_pos, ry, tw, 16 };
+        cx_pos += tw;
+
+        draw_string(scr, cx_pos, ry + 1, " / ", C_FOOTER, rgba(0,0,0,0));
+        cx_pos += draw_string_width(" / ");
+
+        tw = draw_string_width("Sleep");
+        draw_string(scr, cx_pos, ry + 1, "Sleep", C_FOOTER_HI, rgba(0,0,0,0));
+        g_hit_sleep = (hitbox_t){ cx_pos, ry, tw, 16 };
+        cx_pos += tw + 12;
 
         /* Accessibility icon: (i) in a circle */
         draw_circle(scr, cx_pos + 6, ry + 7, 6, C_FOOTER);
@@ -1239,17 +1545,30 @@ static void draw_login_screen(canvas_t* scr)
     draw_string(scr, left_margin, H - 28, OS_BANNER_SHORT,
                 C_INFO_DIM, rgba(0,0,0,0));
 
-    /* ── Uptime clock (bottom-right) ────────────────────────────────── */
-    char uptime[16];
-    uptime[0] = '0' + (char)(hours / 10);   uptime[1] = '0' + (char)(hours % 10);
-    uptime[2] = ':';
-    uptime[3] = '0' + (char)(minutes / 10); uptime[4] = '0' + (char)(minutes % 10);
-    uptime[5] = ':';
-    uptime[6] = '0' + (char)(seconds / 10); uptime[7] = '0' + (char)(seconds % 10);
-    uptime[8] = '\0';
-    int uw = draw_string_width(uptime);
-    draw_string(scr, W - uw - 20, H - 28, uptime,
+    /* ── Real-time clock (bottom-right) ─────────────────────────────── */
+    char timestr[16];
+    timestr[0] = '0' + (char)(hours / 10);   timestr[1] = '0' + (char)(hours % 10);
+    timestr[2] = ':';
+    timestr[3] = '0' + (char)(minutes / 10); timestr[4] = '0' + (char)(minutes % 10);
+    timestr[5] = ':';
+    timestr[6] = '0' + (char)(seconds / 10); timestr[7] = '0' + (char)(seconds % 10);
+    timestr[8] = '\0';
+    int uw = draw_string_width(timestr);
+    draw_string(scr, W - uw - 20, H - 28, timestr,
                 C_INFO, rgba(0,0,0,0));
+
+    /* ── Timezone wizard overlay (if active) ─────────────────────────── */
+    if (g_tz_wizard == TZ_WIZARD_REGION || g_tz_wizard == TZ_WIZARD_CITY)
+        draw_tz_wizard(scr);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * HITBOX HELPER
+ * ═══════════════════════════════════════════════════════════════════════ */
+static bool hitbox_test(const hitbox_t* h, int mx, int my)
+{
+    return mx >= h->x && mx < h->x + h->w &&
+           my >= h->y && my < h->y + h->h;
 }
 
 /* ── Authentication ───────────────────────────────────────────────────── */
@@ -1267,6 +1586,9 @@ void login_run(void)
     if (!fb_ready()) return;
     canvas_t screen = draw_main_canvas();
 
+    /* Initialize RTC */
+    rtc_init();
+
     g_fields[FIELD_PASS].buf[0] = '\0';
     g_fields[FIELD_PASS].len    = 0;
     g_fields[FIELD_PASS].active = true;
@@ -1274,50 +1596,111 @@ void login_run(void)
     g_blink_tick = timer_get_ticks();
     g_cursor_vis = true;
 
-    uint8_t prev_kb_char = 0;
+    /* If timezone not yet configured, launch the setup wizard */
+    if (!rtc_tz_configured()) {
+        g_tz_wizard = TZ_WIZARD_REGION;
+        g_tz_region_sel = 0;
+        g_tz_city_sel = 0;
+    } else {
+        g_tz_wizard = TZ_WIZARD_NONE;
+    }
+
     bool    prev_enter   = false;
 
     while (1) {
+        /* ── Cursor blink ────────────────────────────────────────── */
         uint32_t now = timer_get_ticks();
         if (now - g_blink_tick >= (uint32_t)(TIMER_FREQ / 2)) {
             g_cursor_vis = !g_cursor_vis;
             g_blink_tick = now;
         }
 
-        char ch = keyboard_read();
-        if (ch && ch != (char)prev_kb_char) {
-            field_t* f = &g_fields[FIELD_PASS];
-            if (ch == '\n' || ch == '\r') {
-                if (!prev_enter) {
-                    prev_enter = true;
-                    if (try_login()) return;
-                    g_error = true;
-                    f->len = 0;
-                    f->buf[0] = '\0';
+        /* ── Keyboard input ──────────────────────────────────────── */
+        /* Use raw poll for arrow key support in the wizard */
+        int kc = 0; uint8_t mods = 0; char ch = 0; bool kdown = false;
+        bool got_key = keyboard_poll(&kc, &mods, &ch, &kdown);
+
+        if (got_key && kdown) {
+
+            /* --- Timezone wizard keyboard handling --- */
+            if (g_tz_wizard == TZ_WIZARD_REGION ||
+                g_tz_wizard == TZ_WIZARD_CITY) {
+
+                int count;
+                int* sel;
+                if (g_tz_wizard == TZ_WIZARD_REGION) {
+                    count = TZ_REGION_COUNT;
+                    sel = &g_tz_region_sel;
+                } else {
+                    count = tz_regions[g_tz_region_sel].count;
+                    sel = &g_tz_city_sel;
                 }
+
+                if (kc == 0x1B) { /* Escape */
+                    if (g_tz_wizard == TZ_WIZARD_CITY) {
+                        g_tz_wizard = TZ_WIZARD_REGION;
+                        g_tz_city_sel = 0;
+                    } else {
+                        /* Skip timezone setup (use UTC) */
+                        rtc_set_tz_offset(0);
+                        rtc_set_tz_configured(true);
+                        g_tz_wizard = TZ_WIZARD_NONE;
+                    }
+                } else if (kc == KEY_UP_ARROW || ch == 'k' || ch == 'K') {
+                    if (*sel > 0) (*sel)--;
+                } else if (kc == KEY_DOWN_ARROW || ch == 'j' || ch == 'J') {
+                    if (*sel < count - 1) (*sel)++;
+                } else if (ch == '\n' || ch == '\r') {
+                    if (g_tz_wizard == TZ_WIZARD_REGION) {
+                        g_tz_wizard = TZ_WIZARD_CITY;
+                        g_tz_city_sel = 0;
+                    } else {
+                        /* City selected - apply timezone */
+                        int16_t offset = tz_regions[g_tz_region_sel]
+                                            .cities[g_tz_city_sel].offset;
+                        rtc_set_tz_offset(offset);
+                        rtc_set_tz_configured(true);
+                        g_tz_wizard = TZ_WIZARD_NONE;
+                    }
+                }
+
             } else {
-                prev_enter = false;
-                if (ch == '\b') {
-                    if (f->len > 0) {
-                        f->buf[--f->len] = '\0';
+                /* --- Normal password field handling --- */
+                field_t* f = &g_fields[FIELD_PASS];
+                if (ch == '\n' || ch == '\r') {
+                    if (!prev_enter) {
+                        prev_enter = true;
+                        if (try_login()) return;
+                        g_error = true;
+                        f->len = 0;
+                        f->buf[0] = '\0';
+                    }
+                } else {
+                    prev_enter = false;
+                    if (ch == '\b') {
+                        if (f->len > 0) {
+                            f->buf[--f->len] = '\0';
+                            g_error = false;
+                        }
+                    } else if (ch >= 0x20 && ch < 0x7F && f->len < 63) {
+                        f->buf[f->len++] = ch;
+                        f->buf[f->len]   = '\0';
                         g_error = false;
                     }
-                } else if (ch >= 0x20 && ch < 0x7F && f->len < 63) {
-                    f->buf[f->len++] = ch;
-                    f->buf[f->len]   = '\0';
-                    g_error = false;
                 }
             }
-        } else {
+        } else if (!got_key) {
             prev_enter = false;
         }
-        prev_kb_char = (uint8_t)ch;
 
+        /* ── Mouse input ─────────────────────────────────────────── */
         {
             mouse_event_t mev;
             mouse_get_event(&mev);
-            if (mev.left_clicked) {
+            if (mev.left_clicked && g_tz_wizard == TZ_WIZARD_NONE) {
                 int mx = mev.x, my = mev.y;
+
+                /* Authenticate button */
                 if (mx >= g_btn_x && mx < g_btn_x + BTN_W &&
                     my >= g_btn_y && my < g_btn_y + BTN_H) {
                     if (try_login()) return;
@@ -1325,9 +1708,25 @@ void login_run(void)
                     g_fields[FIELD_PASS].len = 0;
                     g_fields[FIELD_PASS].buf[0] = '\0';
                 }
+
+                /* Footer: Shutdown */
+                if (hitbox_test(&g_hit_shutdown, mx, my)) {
+                    power_shutdown();
+                }
+
+                /* Footer: Restart */
+                if (hitbox_test(&g_hit_restart, mx, my)) {
+                    power_restart();
+                }
+
+                /* Footer: Sleep */
+                if (hitbox_test(&g_hit_sleep, mx, my)) {
+                    power_sleep();
+                }
             }
         }
 
+        /* ── Render ──────────────────────────────────────────────── */
         cursor_erase();
         draw_login_screen(&screen);
         cursor_render();
