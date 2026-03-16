@@ -23,12 +23,16 @@
 #include <scheduler.h>
 #include <kernel/users.h>
 #include <drivers/e1000.h>
+#include <net/net.h>
+#include <net/dhcp.h>
 #include <string.h>
 #include <memory.h>
 
 /* Arrow key keycodes from gui/event.h (avoid include to prevent type conflicts) */
-#define KEY_UP_ARROW   0x100
-#define KEY_DOWN_ARROW 0x101
+#define KEY_UP_ARROW    0x100
+#define KEY_DOWN_ARROW  0x101
+#define KEY_LEFT_ARROW  0x102
+#define KEY_RIGHT_ARROW 0x103
 
 char login_username[64] = "user";
 
@@ -156,20 +160,10 @@ static uint32_t g_popup_tick = 0;     /* when the popup appeared */
 #define NET_PANEL_NONE    0
 #define NET_PANEL_OPEN    1
 static int  g_net_panel      = NET_PANEL_NONE;
-static int  g_net_sel        = 0;    /* selected network index */
-
-/* Simulated WiFi networks visible in the area */
-typedef struct { const char* ssid; int signal; bool secured; } wifi_net_t;
-static const wifi_net_t g_wifi_list[] = {
-    { "AetherOS-5G",        90, true  },
-    { "Home_Network",       75, true  },
-    { "CoffeeShop_Free",    60, false },
-    { "Neighbor_WiFi",      45, true  },
-    { "IoT-Devices",        35, true  },
-    { "Guest_Network",      25, false },
-};
-#define WIFI_COUNT 6
-static int  g_wifi_connected = -1;   /* index of connected wifi, -1 = none */
+static int  g_net_sel        = 0;    /* 0 = Ethernet, 1 = Connect, 2 = Disconnect */
+static bool g_net_dhcp_busy  = false; /* true while DHCP is running */
+static bool g_net_dhcp_ok    = false; /* true if last DHCP attempt succeeded */
+static int  g_net_dhcp_fail  = 0;    /* tick when DHCP failed (for message) */
 
 /* Switch User / Create User panel state */
 #define SWITCH_NONE     0
@@ -1474,9 +1468,46 @@ static void draw_tz_wizard(canvas_t* scr)
  * NETWORK / WIFI SELECTION PANEL
  * ═══════════════════════════════════════════════════════════════════════ */
 
-#define NET_W    340
-#define NET_H    320
+#define NET_W    380
+#define NET_H    300
 #define NET_PAD   20
+
+/* Format an IP address into a static buffer */
+static const char* fmt_ip4(ip4_addr_t ip)
+{
+    static char buf[20];
+    uint8_t* b = (uint8_t*)&ip;
+    int len = 0;
+    for (int i = 0; i < 4; i++) {
+        if (i) buf[len++] = '.';
+        uint8_t v = b[i];
+        if (v >= 100) buf[len++] = '0' + v / 100;
+        if (v >= 10)  buf[len++] = '0' + (v / 10) % 10;
+        buf[len++] = '0' + v % 10;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+/* Format MAC address */
+static const char* fmt_mac(const mac_addr_t* m)
+{
+    static char buf[20];
+    static const char hex[] = "0123456789AB";
+    int p = 0;
+    for (int i = 0; i < 6; i++) {
+        if (i) buf[p++] = ':';
+        buf[p++] = hex[m->b[i] >> 4];
+        buf[p++] = hex[m->b[i] & 0xF];
+    }
+    buf[p] = '\0';
+    return buf;
+}
+
+/* Network panel button IDs for selection */
+#define NET_BTN_CONNECT    0
+#define NET_BTN_DISCONNECT 1
+#define NET_BTN_COUNT      2
 
 static void draw_net_panel(canvas_t* scr)
 {
@@ -1491,97 +1522,143 @@ static void draw_net_panel(canvas_t* scr)
     draw_glass_card(scr, nx, ny, NET_W, NET_H, 16);
 
     /* Title */
-    const char* title = "Network";
+    const char* title = "Network Settings";
     int tw = draw_string_width(title);
     draw_string(scr, nx + (NET_W - tw) / 2, ny + NET_PAD,
                 title, C_NAME, rgba(0,0,0,0));
 
-    /* Ethernet status */
-    int ey = ny + NET_PAD + 24;
-    bool eth_up = e1000_link_up();
-    const char* eth_lbl = eth_up ? "Ethernet: Connected" : "Ethernet: Disconnected";
-    uint32_t eth_col = eth_up ? rgba(0x40, 0xE0, 0x80, 0xFF) : C_ERROR_COL;
-    /* Small circle indicator */
-    draw_circle_filled(scr, nx + NET_PAD + 5, ey + 6, 4, eth_col);
-    draw_string(scr, nx + NET_PAD + 16, ey, eth_lbl, eth_col, rgba(0,0,0,0));
+    int cy = ny + NET_PAD + 28;
+    int lx = nx + NET_PAD;
+    int rw = NET_W - 2 * NET_PAD;
+
+    /* ── Ethernet interface ────────────────────────────────────── */
+    bool link = e1000_link_up();
+    bool has_ip = dhcp_has_lease();
+    const dhcp_lease_t* lease = has_ip ? dhcp_get_lease() : NULL;
+
+    /* Interface icon — simple ethernet plug shape */
+    draw_rect(scr, lx + 2, cy + 2, 12, 8, link ? rgba(0x40,0xE0,0x80,0xFF) : C_TEXT_DIM);
+    draw_rect(scr, lx + 5, cy, 6, 2, link ? rgba(0x40,0xE0,0x80,0xFF) : C_TEXT_DIM);
+
+    /* Interface name + status */
+    const char* iface_name = "Ethernet (e1000)";
+    draw_string(scr, lx + 20, cy, iface_name, C_TEXT, rgba(0,0,0,0));
+
+    const char* status;
+    uint32_t status_col;
+    if (g_net_dhcp_busy) {
+        status = "Connecting...";
+        status_col = C_INFO;
+    } else if (has_ip && link) {
+        status = "Connected";
+        status_col = rgba(0x40, 0xE0, 0x80, 0xFF);
+    } else if (link) {
+        status = "Link Up - No IP";
+        status_col = rgba(0xE0, 0xC0, 0x40, 0xFF);
+    } else {
+        status = "Disconnected";
+        status_col = C_ERROR_COL;
+    }
+    int sw = draw_string_width(status);
+    draw_string(scr, lx + rw - sw, cy, status, status_col, rgba(0,0,0,0));
 
     /* Separator */
-    int sep_y = ey + 20;
-    draw_rect_alpha(scr, nx + NET_PAD, sep_y,
-                    NET_W - 2 * NET_PAD, 1, rgba(0x40, 0x60, 0x80, 0x30));
+    cy += 18;
+    draw_rect_alpha(scr, lx, cy, rw, 1, rgba(0x40, 0x60, 0x80, 0x40));
+    cy += 8;
 
-    /* WiFi label */
-    draw_string(scr, nx + NET_PAD, sep_y + 8, "Wi-Fi Networks",
-                C_SUBTEXT, rgba(0,0,0,0));
+    /* ── Network details ───────────────────────────────────────── */
+    /* MAC address */
+    mac_addr_t mac;
+    e1000_get_mac(&mac);
+    char mac_line[40];
+    const char* ms = fmt_mac(&mac);
+    /* Build "MAC: XX:XX:XX:XX:XX:XX" */
+    strcpy(mac_line, "MAC:  ");
+    strcat(mac_line, ms);
+    draw_string(scr, lx + 8, cy, mac_line, C_SUBTEXT, rgba(0,0,0,0));
+    cy += 16;
 
-    /* WiFi list */
-    int list_y = sep_y + 26;
-    int list_x = nx + NET_PAD;
-    int list_w = NET_W - 2 * NET_PAD;
+    if (has_ip && lease) {
+        /* IP address */
+        char line[40];
+        strcpy(line, "IP:   ");
+        strcat(line, fmt_ip4(lease->ip));
+        draw_string(scr, lx + 8, cy, line, C_TEXT, rgba(0,0,0,0));
+        cy += 16;
 
-    for (int i = 0; i < WIFI_COUNT; i++) {
-        int iy = list_y + i * 30;
-        bool sel = (i == g_net_sel);
-        bool connected = (i == g_wifi_connected);
+        /* Subnet */
+        strcpy(line, "Mask: ");
+        strcat(line, fmt_ip4(lease->netmask));
+        draw_string(scr, lx + 8, cy, line, C_TEXT, rgba(0,0,0,0));
+        cy += 16;
 
-        if (sel) {
-            draw_rect_alpha(scr, list_x, iy, list_w, 26,
-                            rgba(0x30, 0x70, 0xB0, 0x60));
-            draw_rect_rounded_outline(scr, list_x, iy, list_w, 26,
-                                       4, 1, C_FIELD_FOCUS);
-        }
+        /* Gateway */
+        strcpy(line, "GW:   ");
+        strcat(line, fmt_ip4(lease->gateway));
+        draw_string(scr, lx + 8, cy, line, C_TEXT, rgba(0,0,0,0));
+        cy += 16;
 
-        /* Signal strength bars (3 bars) */
-        int bx = list_x + 6;
-        int by = iy + 18;
-        for (int b = 0; b < 3; b++) {
-            int bh = 6 + b * 4;
-            uint32_t bar_col;
-            int threshold = (b + 1) * 30;
-            if (g_wifi_list[i].signal >= threshold)
-                bar_col = sel ? C_NAME : C_TEXT;
-            else
-                bar_col = rgba(0x30, 0x48, 0x60, 0x50);
-            draw_rect(scr, bx + b * 5, by - bh, 3, bh, bar_col);
-        }
+        /* DNS */
+        strcpy(line, "DNS:  ");
+        strcat(line, fmt_ip4(lease->dns));
+        draw_string(scr, lx + 8, cy, line, C_TEXT, rgba(0,0,0,0));
+        cy += 16;
+    } else {
+        draw_string(scr, lx + 8, cy, "No IP address assigned",
+                    C_TEXT_DIM, rgba(0,0,0,0));
+        cy += 16;
+    }
 
-        /* SSID name */
-        draw_string(scr, list_x + 24, iy + 5, g_wifi_list[i].ssid,
-                    sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
-
-        /* Lock icon if secured */
-        if (g_wifi_list[i].secured) {
-            int lx = list_x + list_w - 24;
-            int ly = iy + 5;
-            /* Simple lock: small rect + arc on top */
-            draw_rect(scr, lx, ly + 5, 10, 7, sel ? C_INFO : C_TEXT_DIM);
-            draw_rect(scr, lx + 2, ly + 7, 6, 3, rgba(0x08, 0x10, 0x1C, 0xFF));
-            /* Arc (shackle) */
-            for (int dx = -3; dx <= 3; dx++) {
-                int d2 = 9 - dx * dx;
-                if (d2 < 0) continue;
-                int dy = isqrt(d2);
-                px_blend(scr, lx + 5 + dx, ly + 5 - dy, sel ? C_INFO : C_TEXT_DIM);
-                if (dy > 1)
-                    px_blend(scr, lx + 5 + dx, ly + 6 - dy, sel ? C_INFO : C_TEXT_DIM);
-            }
-        }
-
-        /* "Connected" label */
-        if (connected) {
-            const char* cl = "Connected";
-            int cw = draw_string_width(cl);
-            int cx_pos = list_x + list_w - cw - (g_wifi_list[i].secured ? 30 : 6);
-            draw_string(scr, cx_pos, iy + 5, cl,
-                        rgba(0x40, 0xE0, 0x80, 0xFF), rgba(0,0,0,0));
+    /* DHCP failure message */
+    if (g_net_dhcp_fail && !g_net_dhcp_busy) {
+        uint32_t now = timer_get_ticks();
+        if (now - g_net_dhcp_fail < 500) { /* show for ~5 seconds */
+            draw_string(scr, lx + 8, cy, "DHCP failed - no response",
+                        C_ERROR_COL, rgba(0,0,0,0));
+            cy += 16;
+        } else {
+            g_net_dhcp_fail = 0;
         }
     }
 
-    /* Hint */
-    const char* hint = "Click or Enter to connect. Esc to close.";
-    int hw = draw_string_width(hint);
-    draw_string(scr, nx + (NET_W - hw) / 2, ny + NET_H - NET_PAD - 10,
-                hint, C_INFO, rgba(0,0,0,0));
+    /* ── Action buttons ────────────────────────────────────────── */
+    int btn_y = ny + NET_H - NET_PAD - 36;
+    int btn_w = (rw - 12) / 2;
+
+    /* Connect / Reconnect button */
+    bool connect_sel = (g_net_sel == NET_BTN_CONNECT);
+    uint32_t con_bg = connect_sel ? rgba(0x20, 0x60, 0xA0, 0xB0)
+                                  : rgba(0x18, 0x30, 0x50, 0x60);
+    draw_rect_alpha(scr, lx, btn_y, btn_w, 28, con_bg);
+    draw_rect_rounded_outline(scr, lx, btn_y, btn_w, 28,
+                               6, 1, connect_sel ? C_FIELD_FOCUS : C_TEXT_DIM);
+    const char* con_lbl = has_ip ? "Reconnect" : "Connect";
+    if (g_net_dhcp_busy) con_lbl = "Connecting...";
+    int clw = draw_string_width(con_lbl);
+    draw_string(scr, lx + (btn_w - clw) / 2, btn_y + 7,
+                con_lbl, connect_sel ? C_NAME : C_TEXT, rgba(0,0,0,0));
+
+    /* Disconnect button */
+    bool disc_sel = (g_net_sel == NET_BTN_DISCONNECT);
+    uint32_t disc_bg = disc_sel ? rgba(0x80, 0x20, 0x20, 0xB0)
+                                : rgba(0x30, 0x18, 0x18, 0x60);
+    int disc_x = lx + btn_w + 12;
+    draw_rect_alpha(scr, disc_x, btn_y, btn_w, 28, disc_bg);
+    draw_rect_rounded_outline(scr, disc_x, btn_y, btn_w, 28,
+                               6, 1, disc_sel ? C_ERROR_COL : C_TEXT_DIM);
+    const char* disc_lbl = "Disconnect";
+    int dlw = draw_string_width(disc_lbl);
+    draw_string(scr, disc_x + (btn_w - dlw) / 2, btn_y + 7,
+                disc_lbl, disc_sel ? rgba(0xFF,0x60,0x60,0xFF) : C_TEXT_DIM,
+                rgba(0,0,0,0));
+
+    /* Wi-Fi notice */
+    int note_y = ny + NET_H - NET_PAD - 8;
+    const char* note = "No Wi-Fi adapter detected";
+    int nw = draw_string_width(note);
+    draw_string(scr, nx + (NET_W - nw) / 2, note_y,
+                note, C_TEXT_DIM, rgba(0,0,0,0));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1657,12 +1734,13 @@ static void draw_login_screen(canvas_t* scr)
     int icon_y = info_y + 50;
     draw_status_indicators(scr, left_margin, icon_y, C_INFO);
 
-    /* ── RIGHT SIDE: Login card (centered on the right half) ──────── */
-    int right_half_cx = W * 2 / 3;           /* center card at 2/3 screen */
-    int card_x = right_half_cx - CARD_W / 2;
-    int card_y = H * 18 / 100;
-    if (card_x + CARD_W > W - 40) card_x = W - CARD_W - 40;
-    if (card_x < W * 45 / 100) card_x = W * 45 / 100;
+    /* ── RIGHT SIDE: Login card (centered in right portion) ──────── */
+    int left_end = left_margin + 4 * DIGIT_SPACE + 40;  /* end of clock area */
+    int right_zone = W - left_end;                       /* available right space */
+    int card_x = left_end + (right_zone - CARD_W) / 2;  /* center in right zone */
+    int card_y = (H - CARD_H) / 2 - 40;                 /* vertically centered */
+    if (card_y < 40) card_y = 40;
+    if (card_x + CARD_W > W - 30) card_x = W - CARD_W - 30;
 
     draw_glass_card(scr, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS);
 
@@ -2177,16 +2255,27 @@ void login_run(void)
 
             } else if (g_net_panel == NET_PANEL_OPEN) {
                 /* --- Network panel keyboard handling --- */
-                if (kc == KEY_UP_ARROW) {
-                    if (g_net_sel > 0) g_net_sel--;
-                } else if (kc == KEY_DOWN_ARROW) {
-                    if (g_net_sel < WIFI_COUNT - 1) g_net_sel++;
+                if (kc == KEY_LEFT_ARROW || kc == KEY_RIGHT_ARROW ||
+                    kc == KEY_UP_ARROW || kc == KEY_DOWN_ARROW || ch == '\t') {
+                    g_net_sel = (g_net_sel + 1) % NET_BTN_COUNT;
                 } else if (ch == '\n' || ch == '\r') {
-                    /* Toggle connection */
-                    if (g_wifi_connected == g_net_sel)
-                        g_wifi_connected = -1;
-                    else
-                        g_wifi_connected = g_net_sel;
+                    if (g_net_sel == NET_BTN_CONNECT && !g_net_dhcp_busy) {
+                        g_net_dhcp_busy = true;
+                        g_net_dhcp_fail = 0;
+                        int rc = dhcp_discover();
+                        g_net_dhcp_busy = false;
+                        if (rc == 0) {
+                            g_net_dhcp_ok = true;
+                        } else {
+                            g_net_dhcp_fail = timer_get_ticks();
+                        }
+                    } else if (g_net_sel == NET_BTN_DISCONNECT) {
+                        /* Reset IP config */
+                        net_iface.ip = 0;
+                        net_iface.gateway = 0;
+                        net_iface.netmask = 0;
+                        g_net_dhcp_ok = false;
+                    }
                 } else if (kc == 0x1B) {
                     g_net_panel = NET_PANEL_NONE;
                 }
@@ -2401,39 +2490,37 @@ void login_run(void)
                     my < ny || my > ny + NET_H) {
                     g_net_panel = NET_PANEL_NONE;
                 } else {
-                    /* WiFi list area */
-                    int sep_y = ny + NET_PAD + 24 + 20;
-                    int list_y = sep_y + 26;
-                    int list_x = nx + NET_PAD;
-                    int list_w = NET_W - 2 * NET_PAD;
+                    /* Button area */
+                    int lx = nx + NET_PAD;
+                    int rw = NET_W - 2 * NET_PAD;
+                    int btn_y = ny + NET_H - NET_PAD - 36;
+                    int btn_w = (rw - 12) / 2;
 
-                    for (int i = 0; i < WIFI_COUNT; i++) {
-                        int iy = list_y + i * 30;
-                        if (mx >= list_x && mx < list_x + list_w &&
-                            my >= iy && my < iy + 26) {
-                            if (g_net_sel == i) {
-                                /* Toggle connection */
-                                if (g_wifi_connected == i)
-                                    g_wifi_connected = -1;
-                                else
-                                    g_wifi_connected = i;
-                            } else {
-                                g_net_sel = i;
-                            }
-                            break;
+                    /* Connect button */
+                    if (mx >= lx && mx < lx + btn_w &&
+                        my >= btn_y && my < btn_y + 28) {
+                        g_net_sel = NET_BTN_CONNECT;
+                        if (!g_net_dhcp_busy) {
+                            g_net_dhcp_busy = true;
+                            g_net_dhcp_fail = 0;
+                            int rc = dhcp_discover();
+                            g_net_dhcp_busy = false;
+                            if (rc == 0)
+                                g_net_dhcp_ok = true;
+                            else
+                                g_net_dhcp_fail = timer_get_ticks();
                         }
                     }
-                }
-            }
-
-            /* Scroll wheel in network panel */
-            if (mouse.scroll != 0 && g_net_panel == NET_PANEL_OPEN) {
-                int8_t sw = mouse.scroll;
-                mouse.scroll = 0;
-                if (sw < 0) {
-                    if (g_net_sel < WIFI_COUNT - 1) g_net_sel++;
-                } else {
-                    if (g_net_sel > 0) g_net_sel--;
+                    /* Disconnect button */
+                    int disc_x = lx + btn_w + 12;
+                    if (mx >= disc_x && mx < disc_x + btn_w &&
+                        my >= btn_y && my < btn_y + 28) {
+                        g_net_sel = NET_BTN_DISCONNECT;
+                        net_iface.ip = 0;
+                        net_iface.gateway = 0;
+                        net_iface.netmask = 0;
+                        g_net_dhcp_ok = false;
+                    }
                 }
             }
 
