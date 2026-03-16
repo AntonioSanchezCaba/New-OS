@@ -1744,22 +1744,11 @@ static void draw_login_screen(canvas_t* scr)
 
     draw_glass_card(scr, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS);
 
-    /* ── Avatar ─────────────────────────────────────────────────────── */
-    int avatar_cx = card_x + 75;
-    int avatar_cy = card_y + 68;
-    draw_sphere_avatar(scr, avatar_cx, avatar_cy, AVATAR_R);
-
-    /* ── Username and info (next to avatar) ─────────────────────────── */
-    int name_x = avatar_cx + AVATAR_R + 18;
-    int name_y = avatar_cy - 14;
-    draw_string_scaled_aa(scr, name_x, name_y, login_username, 2, C_NAME);
-
+    /* ── Build "Last Login" string first (needed for centering) ────── */
     char login_info[64];
-    /* Build "Last Login: YYYY.MM.DD HH:MM TZ" */
     int li = 0;
     const char* prefix = "Last Login: ";
     while (*prefix) login_info[li++] = *prefix++;
-    /* Date */
     login_info[li++] = date_str[0]; login_info[li++] = date_str[1];
     login_info[li++] = date_str[2]; login_info[li++] = date_str[3];
     login_info[li++] = '.';
@@ -1773,7 +1762,6 @@ static void draw_login_screen(canvas_t* scr)
     login_info[li++] = '0' + (char)(minutes / 10);
     login_info[li++] = '0' + (char)(minutes % 10);
     login_info[li++] = ' ';
-    /* Timezone label */
     int16_t tz = rtc_get_tz_offset();
     if (tz == 0) {
         login_info[li++] = 'U'; login_info[li++] = 'T'; login_info[li++] = 'C';
@@ -1791,6 +1779,25 @@ static void draw_login_screen(canvas_t* scr)
         }
     }
     login_info[li] = '\0';
+
+    /* ── Center the avatar+text block within the card ────────────── */
+    int avatar_diam = AVATAR_R * 2;
+    int gap = 18;  /* gap between avatar and text */
+    int uname_w = (int)strlen(login_username) * FONT_W * 2; /* scale=2 */
+    int info_w  = draw_string_width(login_info);
+    int text_w  = uname_w > info_w ? uname_w : info_w;
+    int block_w = avatar_diam + gap + text_w;
+    int block_x = card_x + (CARD_W - block_w) / 2;
+
+    /* ── Avatar ─────────────────────────────────────────────────────── */
+    int avatar_cx = block_x + AVATAR_R;
+    int avatar_cy = card_y + 68;
+    draw_sphere_avatar(scr, avatar_cx, avatar_cy, AVATAR_R);
+
+    /* ── Username and info (next to avatar) ─────────────────────────── */
+    int name_x = block_x + avatar_diam + gap;
+    int name_y = avatar_cy - 14;
+    draw_string_scaled_aa(scr, name_x, name_y, login_username, 2, C_NAME);
     draw_string(scr, name_x, name_y + 36, login_info, C_SUBTEXT, rgba(0,0,0,0));
 
     /* Separator */
