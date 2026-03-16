@@ -72,14 +72,14 @@ static const uint8_t seg_table[10] = {
 };
 
 /* ── Layout constants ──────────────────────────────────────────────────── */
-#define CARD_W        400
+#define CARD_W        440
 #define CARD_H        340
 #define CARD_RADIUS    16
-#define FIELD_W       300
+#define FIELD_W       340
 #define FIELD_H        40
 #define FIELD_RADIUS    8
 #define FIELD_PAD      40
-#define BTN_W         300
+#define BTN_W         340
 #define BTN_H          44
 #define BTN_RADIUS      8
 #define AVATAR_R       48
@@ -1745,7 +1745,7 @@ static void draw_login_screen(canvas_t* scr)
     draw_glass_card(scr, card_x, card_y, CARD_W, CARD_H, CARD_RADIUS);
 
     /* ── Avatar ─────────────────────────────────────────────────────── */
-    int avatar_cx = card_x + 68;
+    int avatar_cx = card_x + 75;
     int avatar_cy = card_y + 68;
     draw_sphere_avatar(scr, avatar_cx, avatar_cy, AVATAR_R);
 
