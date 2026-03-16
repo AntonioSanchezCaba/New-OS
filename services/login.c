@@ -73,7 +73,7 @@ static const uint8_t seg_table[10] = {
 
 /* ── Layout constants ──────────────────────────────────────────────────── */
 #define CARD_W        440
-#define CARD_H        340
+#define CARD_H        280
 #define CARD_RADIUS    16
 #define FIELD_W       340
 #define FIELD_H        40
