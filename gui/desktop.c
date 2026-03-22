@@ -46,16 +46,15 @@
 #define MENU_ICON_W       24
 
 /* ---- Desktop icon layout ---- */
-#define ICON_SIZE         40
-#define ICON_CELL_W       80
-#define ICON_CELL_H       72
-#define ICON_MARGIN_X     20
-#define ICON_MARGIN_Y     16
-#define ICON_COLS          2
+#define ICON_SIZE         48
+#define ICON_CELL_W       90
+#define ICON_CELL_H       80
+#define ICON_MARGIN_X     24
+#define ICON_MARGIN_Y     20
 #define ICON_LABEL_GAP     4
 
 /* ---- Starfield ---- */
-#define STAR_COUNT        80
+#define STAR_COUNT        120
 
 /* ---- Desktop state ---- */
 static bool      gui_running       = false;
@@ -98,23 +97,28 @@ static void taskbar_remove_closed(void)
 typedef struct {
     const char* label;
     uint32_t    icon_color;
-    const char* icon_glyph;   /* 5-char icon hint */
-    void (*launch)(void);
 } desktop_icon_t;
 
 static const desktop_icon_t g_desktop_icons[] = {
-    { "Terminal",  0xFF60C0FF, ">_",   NULL },  /* launch funcs set below */
-    { "Files",     0xFFFFC060, "[]",   NULL },
-    { "Editor",    0xFF80E080, "==",   NULL },
-    { "Monitor",   0xFFFF8060, "##",   NULL },
-    { "Settings",  0xFFB0B0C0, "@@",   NULL },
-    { "Network",   0xFF60E0E0, "~~",   NULL },
-    { "Calc",      0xFFE0A0FF, "+-",   NULL },
-    { "Images",    0xFF60FF90, "<>",   NULL },
+    { "Terminal",  0xFF60C0FF },
+    { "Files",     0xFFFFC060 },
+    { "Editor",    0xFF80E080 },
+    { "Monitor",   0xFFFF8060 },
+    { "Settings",  0xFFB0B0C0 },
+    { "Network",   0xFF60E0E0 },
+    { "Calculator",0xFFE0A0FF },
+    { "Images",    0xFF60FF90 },
 };
 #define DESKTOP_ICON_COUNT 8
 
-/* Icon drawing: a small pixel-art style icon */
+/* Get icon position (single column on left side) */
+static void icon_pos(int i, int* cx, int* cy)
+{
+    *cx = ICON_MARGIN_X + ICON_CELL_W / 2;
+    *cy = ICON_MARGIN_Y + i * ICON_CELL_H + ICON_SIZE / 2;
+}
+
+/* Icon drawing: larger pixel-art style icon */
 static void draw_desktop_icon_gfx(canvas_t* scr, int cx, int cy, int idx,
                                     uint32_t color, bool hovered)
 {
@@ -122,102 +126,114 @@ static void draw_desktop_icon_gfx(canvas_t* scr, int cx, int cy, int idx,
     int x = cx - sz / 2;
     int y = cy - sz / 2;
 
-    /* Background: rounded translucent panel */
-    uint32_t bg = hovered ? rgba(0x40, 0x60, 0x90, 0x80) : rgba(0x20, 0x30, 0x50, 0x50);
-    draw_rect_rounded(scr, x, y, sz, sz, 6, bg);
-    if (hovered)
-        draw_rect_rounded_outline(scr, x, y, sz, sz, 6, 1, rgba(0x60, 0xA0, 0xE0, 0x90));
+    /* Background: rounded glass panel */
+    uint32_t bg = hovered ? rgba(0x30, 0x50, 0x80, 0xA0) : rgba(0x18, 0x28, 0x40, 0x60);
+    draw_rect_rounded(scr, x, y, sz, sz, 8, bg);
+    if (hovered) {
+        draw_rect_rounded_outline(scr, x, y, sz, sz, 8, 1, rgba(0x60, 0xA0, 0xE0, 0xC0));
+        /* Glow effect */
+        draw_rect_alpha(scr, x-2, y-2, sz+4, sz+4, rgba(0x40, 0x80, 0xCC, 0x18));
+    }
 
-    /* Icon interior: varies by type */
+    /* Icon interior */
     uint32_t c1 = color;
-    uint32_t c2 = (color & 0x00FFFFFF) | 0xA0000000; /* dimmer */
+    uint32_t c2 = (color & 0x00FFFFFF) | 0x90000000;
     switch (idx) {
     case 0: /* Terminal >_ */
-        draw_line(scr, x+10, y+12, x+18, y+20, c1);
-        draw_line(scr, x+18, y+20, x+10, y+28, c1);
-        draw_hline(scr, x+20, y+28, 10, c1);
+        draw_rect_rounded(scr, x+6, y+6, sz-12, sz-12, 3, rgba(0x08, 0x10, 0x18, 0xC0));
+        draw_line(scr, x+12, y+14, x+20, y+24, c1);
+        draw_line(scr, x+20, y+24, x+12, y+34, c1);
+        draw_hline(scr, x+22, y+34, 14, c1);
         break;
     case 1: /* Files - folder */
-        draw_rect_rounded(scr, x+8, y+14, 24, 18, 2, c2);
-        draw_rect(scr, x+8, y+11, 12, 5, c1);
-        draw_rect_rounded(scr, x+8, y+14, 24, 16, 2, c1);
+        draw_rect_rounded(scr, x+8, y+16, 32, 22, 3, c2);
+        draw_rect(scr, x+8, y+12, 14, 6, c1);
+        draw_rect_rounded(scr, x+8, y+16, 32, 20, 3, c1);
+        draw_hline(scr, x+12, y+22, 24, rgba(0xFF,0xFF,0xFF,0x30));
         break;
-    case 2: /* Editor - lines */
-        draw_hline(scr, x+10, y+13, 20, c1);
-        draw_hline(scr, x+10, y+18, 16, c2);
-        draw_hline(scr, x+10, y+23, 18, c1);
-        draw_hline(scr, x+10, y+28, 12, c2);
+    case 2: /* Editor - document with lines */
+        draw_rect_rounded(scr, x+10, y+6, 28, 36, 3, rgba(0xFF,0xFF,0xFF,0xE0));
+        draw_hline(scr, x+14, y+14, 20, c1);
+        draw_hline(scr, x+14, y+20, 16, c2);
+        draw_hline(scr, x+14, y+26, 18, c1);
+        draw_hline(scr, x+14, y+32, 12, c2);
         break;
-    case 3: /* Monitor - chart */
-        draw_rect_outline(scr, x+8, y+10, 24, 20, 1, c2);
-        draw_line(scr, x+12, y+26, x+16, y+18, c1);
-        draw_line(scr, x+16, y+18, x+20, y+22, c1);
-        draw_line(scr, x+20, y+22, x+24, y+14, c1);
-        draw_line(scr, x+24, y+14, x+28, y+16, c1);
+    case 3: /* Monitor - chart with bars */
+        draw_rect_rounded(scr, x+6, y+8, 36, 26, 3, rgba(0x10,0x18,0x28,0xD0));
+        draw_rect(scr, x+12, y+24, 5, 8, c1);
+        draw_rect(scr, x+19, y+18, 5, 14, rgba(0x40,0xCC,0x60,0xFF));
+        draw_rect(scr, x+26, y+14, 5, 18, c1);
+        draw_rect(scr, x+33, y+20, 5, 12, rgba(0xFF,0xCC,0x40,0xFF));
+        /* Stand */
+        draw_rect(scr, x+20, y+36, 8, 3, rgba(0x80,0x90,0xA0,0xFF));
+        draw_hline(scr, x+16, y+39, 16, rgba(0x80,0x90,0xA0,0xFF));
         break;
     case 4: /* Settings - gear */
-        draw_circle(scr, x+20, y+20, 8, c1);
-        draw_circle_filled(scr, x+20, y+20, 4, c1);
-        draw_rect(scr, x+19, y+10, 2, 4, c1);
-        draw_rect(scr, x+19, y+26, 2, 4, c1);
-        draw_rect(scr, x+10, y+19, 4, 2, c1);
-        draw_rect(scr, x+26, y+19, 4, 2, c1);
+        draw_circle(scr, x+24, y+24, 12, c1);
+        draw_circle(scr, x+24, y+24, 11, c1);
+        draw_circle_filled(scr, x+24, y+24, 6, c1);
+        draw_circle_filled(scr, x+24, y+24, 3, bg);
+        draw_rect(scr, x+23, y+10, 2, 5, c1);
+        draw_rect(scr, x+23, y+33, 2, 5, c1);
+        draw_rect(scr, x+10, y+23, 5, 2, c1);
+        draw_rect(scr, x+33, y+23, 5, 2, c1);
         break;
-    case 5: /* Network - signal */
-        draw_circle(scr, x+20, y+26, 2, c1);
-        draw_circle(scr, x+20, y+22, 6, c2);
-        draw_circle(scr, x+20, y+18, 10, c2);
-        draw_rect(scr, x+8, y+10, 24, 10, bg); /* mask top half */
+    case 5: /* Network - globe/signal */
+        draw_circle(scr, x+24, y+24, 14, c2);
+        draw_circle(scr, x+24, y+24, 10, c1);
+        draw_hline(scr, x+14, y+24, 20, c1);
+        draw_vline(scr, x+24, y+14, 20, c1);
+        draw_circle(scr, x+24, y+24, 6, c2);
         break;
     case 6: /* Calculator */
-        draw_rect_rounded(scr, x+10, y+9, 20, 22, 2, c2);
-        draw_rect(scr, x+12, y+11, 16, 6, c1);
-        draw_rect(scr, x+12, y+20, 4, 3, c1);
-        draw_rect(scr, x+18, y+20, 4, 3, c1);
-        draw_rect(scr, x+24, y+20, 4, 3, c1);
-        draw_rect(scr, x+12, y+26, 4, 3, c1);
-        draw_rect(scr, x+18, y+26, 4, 3, c1);
-        draw_rect(scr, x+24, y+26, 4, 3, c1);
+        draw_rect_rounded(scr, x+10, y+6, 28, 36, 4, c2);
+        draw_rect(scr, x+14, y+10, 20, 8, rgba(0x20,0x30,0x40,0xFF));
+        draw_string(scr, x+16, y+11, "123", c1, rgba(0,0,0,0));
+        draw_rect(scr, x+14, y+22, 6, 5, c1);
+        draw_rect(scr, x+22, y+22, 6, 5, c1);
+        draw_rect(scr, x+30, y+22, 6, 5, rgba(0xFF,0x80,0x40,0xFF));
+        draw_rect(scr, x+14, y+30, 6, 5, c1);
+        draw_rect(scr, x+22, y+30, 6, 5, c1);
+        draw_rect(scr, x+30, y+30, 6, 5, rgba(0x40,0xCC,0x60,0xFF));
         break;
-    case 7: /* Images - mountain */
-        draw_rect_rounded(scr, x+8, y+10, 24, 20, 2, c2);
-        draw_line(scr, x+12, y+26, x+18, y+16, c1);
-        draw_line(scr, x+18, y+16, x+22, y+22, c1);
-        draw_line(scr, x+22, y+22, x+28, y+14, c1);
-        draw_circle_filled(scr, x+24, y+14, 2, 0xFFFFE060);
+    case 7: /* Images - landscape */
+        draw_rect_rounded(scr, x+6, y+8, 36, 28, 3, rgba(0x30,0x60,0x90,0xE0));
+        draw_line(scr, x+10, y+30, x+18, y+18, rgba(0x40,0xA0,0x40,0xFF));
+        draw_line(scr, x+18, y+18, x+24, y+24, rgba(0x40,0xA0,0x40,0xFF));
+        draw_line(scr, x+24, y+24, x+32, y+14, rgba(0x60,0xC0,0x60,0xFF));
+        draw_line(scr, x+32, y+14, x+38, y+20, rgba(0x60,0xC0,0x60,0xFF));
+        draw_circle_filled(scr, x+32, y+14, 3, 0xFFFFE060);
+        /* Fill bottom */
+        for (int fy = 26; fy <= 32; fy++)
+            draw_hline(scr, x+8, y+fy, 32, rgba(0x30,0x80,0x30, (uint8_t)(0x40 + (fy-26)*0x18)));
         break;
     }
 }
 
 static void draw_desktop_icons(canvas_t* scr)
 {
-    int W = scr->width;
     int H = scr->height - TASKBAR_H;
 
     for (int i = 0; i < DESKTOP_ICON_COUNT; i++) {
-        int col = i / ((DESKTOP_ICON_COUNT + 1) / ICON_COLS);
-        int row = i % ((DESKTOP_ICON_COUNT + 1) / ICON_COLS);
-        if (col >= ICON_COLS) { col = 1; row = i - (DESKTOP_ICON_COUNT + 1) / ICON_COLS; }
+        int cx, cy;
+        icon_pos(i, &cx, &cy);
+        if (cy + ICON_SIZE/2 + FONT_H + ICON_LABEL_GAP >= H) continue;
 
-        int cx = ICON_MARGIN_X + col * ICON_CELL_W + ICON_CELL_W / 2;
-        int cy = ICON_MARGIN_Y + row * ICON_CELL_H + ICON_SIZE / 2;
-
-        /* Check hover */
         bool hov = (mouse.x >= cx - ICON_CELL_W/2 && mouse.x < cx + ICON_CELL_W/2 &&
                     mouse.y >= cy - ICON_SIZE/2 - 4 && mouse.y < cy + ICON_SIZE/2 + FONT_H + ICON_LABEL_GAP + 4 &&
                     mouse.y < H);
 
         draw_desktop_icon_gfx(scr, cx, cy, i, g_desktop_icons[i].icon_color, hov);
 
-        /* Label below icon */
+        /* Label below icon (with shadow) */
         int lw = draw_string_width(g_desktop_icons[i].label);
         int lx = cx - lw / 2;
         int ly = cy + ICON_SIZE / 2 + ICON_LABEL_GAP;
+        draw_string(scr, lx+1, ly+1, g_desktop_icons[i].label,
+                    rgba(0,0,0,0x80), rgba(0,0,0,0));
         uint32_t label_col = hov ? 0xFFFFFFFF : rgba(0xC0, 0xD8, 0xF0, 0xE0);
         draw_string(scr, lx, ly, g_desktop_icons[i].label, label_col, rgba(0,0,0,0));
     }
-
-    (void)W; (void)H;
 }
 
 static void desktop_icon_click(int mx, int my)
@@ -226,12 +242,8 @@ static void desktop_icon_click(int mx, int my)
     if (my >= H) return;
 
     for (int i = 0; i < DESKTOP_ICON_COUNT; i++) {
-        int col = i / ((DESKTOP_ICON_COUNT + 1) / ICON_COLS);
-        int row = i % ((DESKTOP_ICON_COUNT + 1) / ICON_COLS);
-        if (col >= ICON_COLS) { col = 1; row = i - (DESKTOP_ICON_COUNT + 1) / ICON_COLS; }
-
-        int cx = ICON_MARGIN_X + col * ICON_CELL_W + ICON_CELL_W / 2;
-        int cy = ICON_MARGIN_Y + row * ICON_CELL_H + ICON_SIZE / 2;
+        int cx, cy;
+        icon_pos(i, &cx, &cy);
 
         if (mx >= cx - ICON_CELL_W/2 && mx < cx + ICON_CELL_W/2 &&
             my >= cy - ICON_SIZE/2 - 4 && my < cy + ICON_SIZE/2 + FONT_H + ICON_LABEL_GAP + 4) {
@@ -251,7 +263,7 @@ static void desktop_icon_click(int mx, int my)
 }
 
 /* ---- Starfield (static background stars) ---- */
-static struct { int16_t x, y; uint8_t brightness; } g_stars[STAR_COUNT];
+static struct { int16_t x, y; uint8_t brightness; uint8_t size; } g_stars[STAR_COUNT];
 static bool g_stars_inited = false;
 
 static uint32_t star_rand_seed = 42;
@@ -265,7 +277,8 @@ static void init_starfield(int W, int H)
     for (int i = 0; i < STAR_COUNT; i++) {
         g_stars[i].x = (int16_t)(star_rand() % (uint32_t)W);
         g_stars[i].y = (int16_t)(star_rand() % (uint32_t)(H - TASKBAR_H));
-        g_stars[i].brightness = (uint8_t)(40 + star_rand() % 60);
+        g_stars[i].brightness = (uint8_t)(30 + star_rand() % 80);
+        g_stars[i].size = (star_rand() % 10 < 2) ? 2 : 1; /* 20% bigger stars */
     }
     g_stars_inited = true;
 }
@@ -274,22 +287,58 @@ static void draw_starfield(canvas_t* scr)
 {
     if (!g_stars_inited) init_starfield(scr->width, scr->height);
 
-    /* Twinkle: vary brightness slightly per frame */
     for (int i = 0; i < STAR_COUNT; i++) {
         uint8_t b = g_stars[i].brightness;
-        /* Subtle twinkle based on frame count */
-        int twinkle = (int)((g_frame_count + (uint32_t)i * 37) % 60);
-        if (twinkle < 15) b = (uint8_t)(b + 20);
-        else if (twinkle > 45) b = (uint8_t)(b > 20 ? b - 15 : 10);
-        uint32_t col = rgba(b, (uint8_t)(b + 20), 0xFF, b);
-        draw_pixel(scr, g_stars[i].x, g_stars[i].y, col);
-        /* Brighter stars get a cross pattern */
-        if (g_stars[i].brightness > 70) {
-            uint32_t dim = rgba((uint8_t)(b/3), (uint8_t)(b/3 + 8), (uint8_t)(b/2), (uint8_t)(b/2));
-            draw_pixel(scr, g_stars[i].x - 1, g_stars[i].y, dim);
-            draw_pixel(scr, g_stars[i].x + 1, g_stars[i].y, dim);
-            draw_pixel(scr, g_stars[i].x, g_stars[i].y - 1, dim);
-            draw_pixel(scr, g_stars[i].x, g_stars[i].y + 1, dim);
+        /* Twinkle */
+        int twinkle = (int)((g_frame_count + (uint32_t)i * 37) % 80);
+        if (twinkle < 20) b = (uint8_t)(b + 30 > 255 ? 255 : b + 30);
+        else if (twinkle > 60) b = (uint8_t)(b > 25 ? b - 20 : 5);
+
+        uint32_t col = rgba(b, (uint8_t)(b + 20 > 255 ? 255 : b + 20), 0xFF, b);
+        int sx = g_stars[i].x, sy = g_stars[i].y;
+
+        if (g_stars[i].size == 2) {
+            /* Larger star: 3x3 cross pattern */
+            draw_pixel(scr, sx, sy, col);
+            uint32_t dim = rgba((uint8_t)(b/2), (uint8_t)(b/2 + 10), (uint8_t)(b/2 + 30), (uint8_t)(b/2));
+            draw_pixel(scr, sx-1, sy, dim);
+            draw_pixel(scr, sx+1, sy, dim);
+            draw_pixel(scr, sx, sy-1, dim);
+            draw_pixel(scr, sx, sy+1, dim);
+        } else {
+            draw_pixel(scr, sx, sy, col);
+        }
+    }
+}
+
+/* ---- Central radial glow on desktop ---- */
+static void draw_desktop_glow(canvas_t* scr)
+{
+    int cx = scr->width / 2;
+    int cy = (scr->height - TASKBAR_H) / 2;
+    int radius = 200;
+
+    /* Draw soft radial glow - only sample every 2 pixels for speed */
+    for (int y = cy - radius; y < cy + radius; y += 2) {
+        if (y < 0 || y >= scr->height - TASKBAR_H) continue;
+        for (int x = cx - radius; x < cx + radius; x += 2) {
+            if (x < 0 || x >= scr->width) continue;
+            int dx = x - cx, dy = y - cy;
+            int dist2 = dx*dx + dy*dy;
+            if (dist2 >= radius * radius) continue;
+            int dist = 0;
+            /* Fast integer sqrt approximation */
+            { int t = dist2, r = 0, b = 1 << 14;
+              while (b > t) b >>= 2;
+              while (b) { if (t >= r + b) { t -= r + b; r = (r >> 1) + b; } else r >>= 1; b >>= 2; }
+              dist = r; }
+            uint8_t alpha = (uint8_t)(12 * (radius - dist) / radius);
+            uint32_t gcol = rgba(0x20, 0x40, 0x80, alpha);
+            /* Write 2x2 block */
+            draw_pixel(scr, x, y, gcol);
+            draw_pixel(scr, x+1, y, gcol);
+            draw_pixel(scr, x, y+1, gcol);
+            draw_pixel(scr, x+1, y+1, gcol);
         }
     }
 }
@@ -301,41 +350,43 @@ static void draw_desktop_widget(canvas_t* scr)
     rtc_get_time(&t);
 
     int W = scr->width;
-    int widget_w = 180;
-    int widget_h = 70;
-    int wx = W - widget_w - 20;
-    int wy = 16;
+    int widget_w = 200;
+    int widget_h = 90;
+    int wx = W - widget_w - 24;
+    int wy = 20;
 
-    /* Semi-transparent background */
-    draw_rect_alpha(scr, wx, wy, widget_w, widget_h, rgba(0x08, 0x10, 0x20, 0x60));
+    /* Glass background */
+    draw_rect_alpha(scr, wx, wy, widget_w, widget_h, rgba(0x08, 0x12, 0x20, 0x70));
     draw_rect_rounded_outline(scr, wx, wy, widget_w, widget_h, 8, 1,
-                               rgba(0x40, 0x60, 0x90, 0x40));
+                               rgba(0x40, 0x60, 0x90, 0x50));
+    /* Top highlight */
+    draw_hline(scr, wx+8, wy+1, widget_w-16, rgba(0x60, 0x80, 0xB0, 0x20));
 
-    /* Time: HH:MM large */
-    char time_str[6];
+    /* Time: HH:MM:SS */
+    char time_str[9];
     time_str[0] = '0' + (char)(t.hour / 10);
     time_str[1] = '0' + (char)(t.hour % 10);
     time_str[2] = ':';
     time_str[3] = '0' + (char)(t.minute / 10);
     time_str[4] = '0' + (char)(t.minute % 10);
-    time_str[5] = '\0';
+    time_str[5] = ':';
+    time_str[6] = '0' + (char)(t.second / 10);
+    time_str[7] = '0' + (char)(t.second % 10);
+    time_str[8] = '\0';
 
-    /* Draw time large (bold effect: draw at 4 offsets) */
+    /* Bold time (draw at multiple offsets) */
     int tw = draw_string_width(time_str);
     int tx = wx + (widget_w - tw) / 2;
     int ty = wy + 10;
-    uint32_t tc1 = rgba(0xD0, 0xE8, 0xFF, 0xE0);
-    uint32_t tc2 = rgba(0xB0, 0xD0, 0xF0, 0x90);
-    draw_string(scr, tx, ty,     time_str, tc1, rgba(0,0,0,0));
-    draw_string(scr, tx+1, ty,   time_str, tc1, rgba(0,0,0,0));
-    draw_string(scr, tx, ty+1,   time_str, tc2, rgba(0,0,0,0));
-    draw_string(scr, tx+1, ty+1, time_str, tc2, rgba(0,0,0,0));
+    uint32_t tc = rgba(0xD0, 0xE8, 0xFF, 0xF0);
+    draw_string(scr, tx, ty,     time_str, tc, rgba(0,0,0,0));
+    draw_string(scr, tx+1, ty,   time_str, tc, rgba(0,0,0,0));
 
-    /* Date line below */
-    static const char* day_names[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+    /* Date: YYYY.MM.DD  DayName */
+    static const char* day_names[] = {"Sunday","Monday","Tuesday","Wednesday",
+                                       "Thursday","Friday","Saturday"};
     char date_str[32];
     int di = 0;
-    /* YYYY.MM.DD  Day */
     date_str[di++] = '0' + (char)(t.year / 1000);
     date_str[di++] = '0' + (char)((t.year / 100) % 10);
     date_str[di++] = '0' + (char)((t.year / 10) % 10);
@@ -346,25 +397,70 @@ static void draw_desktop_widget(canvas_t* scr)
     date_str[di++] = '.';
     date_str[di++] = '0' + (char)(t.day / 10);
     date_str[di++] = '0' + (char)(t.day % 10);
-    date_str[di++] = ' ';
-    date_str[di++] = ' ';
-    const char* dn = (t.weekday < 7) ? day_names[t.weekday] : "???";
-    while (*dn) date_str[di++] = *dn++;
     date_str[di] = '\0';
 
     int dw = draw_string_width(date_str);
-    draw_string(scr, wx + (widget_w - dw) / 2, wy + 40,
-                date_str, rgba(0x90, 0xB0, 0xD0, 0xC0), rgba(0,0,0,0));
+    draw_string(scr, wx + (widget_w - dw) / 2, wy + 34,
+                date_str, rgba(0xA0, 0xC0, 0xE0, 0xC0), rgba(0,0,0,0));
 
-    /* Seconds as small dots */
-    int dots_y = wy + widget_h - 8;
-    int dots_x = wx + 10;
-    for (int s = 0; s < 60; s++) {
-        uint32_t dcol = (s < (int)t.second)
-                        ? rgba(0x40, 0x80, 0xCC, 0x80)
-                        : rgba(0x30, 0x40, 0x50, 0x30);
-        int px = dots_x + s * (widget_w - 20) / 60;
-        draw_pixel(scr, px, dots_y, dcol);
+    /* Day name */
+    const char* dn = (t.weekday < 7) ? day_names[t.weekday] : "Unknown";
+    int dnw = draw_string_width(dn);
+    draw_string(scr, wx + (widget_w - dnw) / 2, wy + 54,
+                dn, rgba(0x80, 0xA0, 0xC8, 0xA0), rgba(0,0,0,0));
+
+    /* Seconds progress bar */
+    int bar_x = wx + 16;
+    int bar_w = widget_w - 32;
+    int bar_y = wy + widget_h - 12;
+    draw_rect_rounded(scr, bar_x, bar_y, bar_w, 4, 2, rgba(0x20, 0x30, 0x50, 0x60));
+    int fill_w = (int)t.second * bar_w / 60;
+    if (fill_w > 0)
+        draw_rect_rounded(scr, bar_x, bar_y, fill_w, 4, 2, rgba(0x30, 0x70, 0xBB, 0xA0));
+}
+
+/* ---- Welcome / system info panel (center) ---- */
+static void draw_welcome_panel(canvas_t* scr)
+{
+    /* Only show when no windows are open */
+    if (taskbar_count > 0) return;
+
+    int W = scr->width;
+    int H = scr->height - TASKBAR_H;
+    int pw = 360;
+    int ph = 180;
+    int px = (W - pw) / 2;
+    int py = (H - ph) / 2 - 20;
+
+    /* Glass panel */
+    draw_rect_alpha(scr, px, py, pw, ph, rgba(0x0A, 0x14, 0x24, 0x50));
+    draw_rect_rounded_outline(scr, px, py, pw, ph, 10, 1, rgba(0x30, 0x50, 0x80, 0x40));
+
+    /* Title */
+    const char* title = "Welcome to " OS_NAME;
+    int ttw = draw_string_width(title);
+    draw_string(scr, px + (pw - ttw) / 2, py + 20,
+                title, rgba(0xD0, 0xE8, 0xFF, 0xE0), rgba(0,0,0,0));
+
+    /* Separator */
+    draw_hline(scr, px + 30, py + 44, pw - 60, rgba(0x30, 0x50, 0x80, 0x40));
+
+    /* Info lines */
+    const char* lines[] = {
+        OS_BANNER_SHORT,
+        "",
+        "Click desktop icons to launch apps",
+        "or use the Aether menu (bottom-left)",
+        "",
+        "Right-click to close menus",
+    };
+    int ly = py + 54;
+    for (int i = 0; i < 6; i++) {
+        if (lines[i][0] == '\0') { ly += 8; continue; }
+        int lw = draw_string_width(lines[i]);
+        uint32_t lc = (i == 0) ? rgba(0x60, 0xA0, 0xE0, 0xD0) : rgba(0x90, 0xB0, 0xD0, 0xA0);
+        draw_string(scr, px + (pw - lw) / 2, ly, lines[i], lc, rgba(0,0,0,0));
+        ly += FONT_H + 2;
     }
 }
 
@@ -374,8 +470,17 @@ static void draw_desktop_bg(void)
     /* Use the wallpaper engine (falls back to gradient if no image loaded) */
     wallpaper_draw(&g_screen);
 
+    /* Subtle radial glow in center */
+    draw_desktop_glow(&g_screen);
+
     /* Starfield overlay */
     draw_starfield(&g_screen);
+
+    /* Subtle grid pattern */
+    for (int gy = 0; gy < g_screen.height - TASKBAR_H; gy += 48)
+        draw_hline(&g_screen, 0, gy, g_screen.width, rgba(0x20, 0x40, 0x60, 0x08));
+    for (int gx = 0; gx < g_screen.width; gx += 48)
+        draw_vline(&g_screen, gx, 0, g_screen.height - TASKBAR_H, rgba(0x20, 0x40, 0x60, 0x08));
 
     /* OS watermark bottom-right, semi-transparent */
     const char* wm_str = OS_BANNER_SHORT;
@@ -640,11 +745,11 @@ void desktop_tick(void)
 {
     draw_desktop_bg();
     draw_desktop_icons(&g_screen);
+    draw_welcome_panel(&g_screen);
     draw_desktop_widget(&g_screen);
     taskbar_draw(&g_screen);
     draw_start_menu(&g_screen);
     notify_tick(&g_screen);
-    /* Advance window animations */
     anim_tick();
 }
 
@@ -694,8 +799,7 @@ void gui_run(void)
     notify_post(NOTIFY_INFO, OS_BOOT_WELCOME,
                 "Desktop environment loaded.");
 
-    /* Launch initial apps */
-    gui_launch_terminal();
+    /* Desktop is clean - user clicks icons or start menu to launch apps */
 
     uint32_t last_ticks = 0;
     uint8_t  prev_buttons = 0;
