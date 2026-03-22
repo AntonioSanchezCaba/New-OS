@@ -33,6 +33,7 @@
 #include <gui/window.h>
 #include <gui/notify.h>
 #include <services/login.h>
+#include <drivers/rtc.h>
 #include <net/net.h>
 #include <net/tcp.h>
 #include <memory.h>
@@ -116,21 +117,18 @@ static void are_draw_statusbar(canvas_t* c)
     draw_string(c, cx, bar_y + (STATUS_H - FONT_H) / 2,
                 center_str, ACOLOR(0x50, 0x70, 0xB0, 0xFF), ACOLOR(0,0,0,0));
 
-    /* Right: uptime HH:MM:SS */
-    uint32_t total_s  = timer_get_ticks() / TIMER_FREQ;
-    uint32_t hh = total_s / 3600;
-    uint32_t mm = (total_s % 3600) / 60;
-    uint32_t ss = total_s % 60;
+    /* Right: real-time clock HH:MM:SS */
+    rtc_time_t rtc_now;
+    rtc_get_time(&rtc_now);
     char tbuf[16];
-    /* Build string manually (no sprintf in kernel) */
-    tbuf[0]  = '0' + (hh / 10) % 10;
-    tbuf[1]  = '0' + (hh      ) % 10;
+    tbuf[0]  = '0' + (char)(rtc_now.hour / 10);
+    tbuf[1]  = '0' + (char)(rtc_now.hour % 10);
     tbuf[2]  = ':';
-    tbuf[3]  = '0' + (mm / 10) % 10;
-    tbuf[4]  = '0' + (mm      ) % 10;
+    tbuf[3]  = '0' + (char)(rtc_now.minute / 10);
+    tbuf[4]  = '0' + (char)(rtc_now.minute % 10);
     tbuf[5]  = ':';
-    tbuf[6]  = '0' + (ss / 10) % 10;
-    tbuf[7]  = '0' + (ss      ) % 10;
+    tbuf[6]  = '0' + (char)(rtc_now.second / 10);
+    tbuf[7]  = '0' + (char)(rtc_now.second % 10);
     tbuf[8]  = '\0';
 
     int tx = (int)c->width - (int)strlen(tbuf) * FONT_W - 8;
