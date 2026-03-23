@@ -237,7 +237,37 @@ int tcp_send(int sock, const void* data, size_t len)
 {
     tcp_socket_t* s = get_socket(sock);
     if (!s || s->state != TCP_ESTABLISHED) return -1;
-    return tcp_send_segment(s, TCP_ACK | TCP_PSH, data, len);
+
+    /*
+     * MSS-based segmentation: break large payloads into TCP_MSS chunks.
+     * Each segment is sent independently; the retransmit buffer saves the
+     * most recent unACKed segment for recovery via tcp_tick().
+     * This enables bulk data transfer (e.g. HTTP responses) that previously
+     * failed because the single 2048-byte retransmit buffer was too small.
+     */
+    const uint8_t* ptr  = (const uint8_t*)data;
+    size_t         left = len;
+    int            sent = 0;
+
+    while (left > 0) {
+        size_t chunk = (left > TCP_MSS) ? TCP_MSS : left;
+        int rc = tcp_send_segment(s, TCP_ACK | TCP_PSH, ptr, chunk);
+        if (rc < 0) {
+            /* Partial send: return bytes delivered so far, or -1 if none */
+            return (sent > 0) ? sent : -1;
+        }
+        ptr  += chunk;
+        left -= chunk;
+        sent += (int)chunk;
+
+        /* If there are more segments to send and a retransmit is pending,
+         * yield briefly so tcp_tick() can process any incoming ACKs and
+         * clear the retransmit window before we enqueue the next segment. */
+        if (left > 0 && s->tx_rtx_time != 0)
+            scheduler_yield();
+    }
+
+    return sent;
 }
 
 int tcp_recv(int sock, void* buf, size_t len)

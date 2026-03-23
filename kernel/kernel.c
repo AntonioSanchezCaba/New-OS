@@ -226,7 +226,7 @@ void kernel_main(struct multiboot2_info* mb2_info)
             kinfo("Initializing wallpaper engine...");
             wallpaper_init();                    /* [PARTIAL] — static BMP only */
             kinfo("Initializing window animations...");
-            anim_init();                         /* [PARTIAL] — alpha only */
+            anim_init();                         /* [STABLE] — open/close/min/shade */
             kinfo("Initializing Aether Render Engine...");
             are_init();                          /* [STABLE] */
             kinfo("[BOOT] GUI stack OK");

@@ -39,6 +39,7 @@
 #include <string.h>
 #include <kernel.h>
 #include <scheduler.h>
+#include <kernel/diskman.h>
 
 /* =========================================================
  * State
@@ -741,4 +742,7 @@ void are_run(void)
     } while (g_logout_requested);
 
     kinfo("ARE: render loop exited");
+    /* Flush any dirty ext2 in-memory images back to disk before halt */
+    diskman_shutdown();
+    kinfo("ARE: disk caches flushed");
 }

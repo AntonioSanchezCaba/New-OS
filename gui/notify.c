@@ -106,7 +106,15 @@ void notify_tick(canvas_t* screen)
         /* Fade effect: compute alpha-like offset (brighten or shift) */
         bool fading = (left < 30);
 
-        int nx = screen->width - NOTIF_W - margin;
+        /* Slide-in from the right edge during the first 15 ticks */
+        int slide_x = screen->width - NOTIF_W - margin;
+        if (age < 15) {
+            /* Linear slide: start fully off-screen, reach final position at tick 15 */
+            int off = (int)((uint32_t)(15 - age) * (uint32_t)(NOTIF_W + margin) / 15);
+            slide_x = screen->width - NOTIF_W - margin + off;
+        }
+
+        int nx = slide_x;
         int ny = slot_y;
 
         /* Background */

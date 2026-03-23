@@ -18,11 +18,13 @@ typedef enum {
     ANIM_UNSHADE   = 6,   /* Unroll from title bar       */
 } anim_type_t;
 
-#define ANIM_DURATION_OPEN    12   /* frames */
-#define ANIM_DURATION_CLOSE   10
+#define ANIM_DURATION_OPEN     12   /* frames */
+#define ANIM_DURATION_CLOSE    10
 #define ANIM_DURATION_MINIMIZE 14
 #define ANIM_DURATION_RESTORE  14
-#define ANIM_MAX              32   /* Max concurrent animations */
+#define ANIM_DURATION_SHADE    10   /* Roll-up to title bar */
+#define ANIM_DURATION_UNSHADE  10   /* Unroll from title bar */
+#define ANIM_MAX               32   /* Max concurrent animations */
 
 typedef struct {
     bool        active;

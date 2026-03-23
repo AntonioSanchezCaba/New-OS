@@ -34,6 +34,7 @@
 #define WF_MAXIMIZED   (1 << 5)
 #define WF_NO_TITLEBAR (1 << 6)
 #define WF_RESIZEABLE  (1 << 7)   /* Allows drag-to-resize at edges/corners */
+#define WF_SHADED      (1 << 8)   /* Window rolled up to title bar only     */
 
 /* Resize edge bitmask (stored in resize_edge) */
 #define RESIZE_NONE   0x00

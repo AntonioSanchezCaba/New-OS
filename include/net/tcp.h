@@ -46,7 +46,8 @@ typedef enum {
 #define TCP_RTO_INITIAL   300   /* Initial RTO: 3 s at 100 Hz              */
 #define TCP_RTO_MAX      6000   /* Max RTO: 60 s (exponential backoff cap)  */
 #define TCP_MAX_RETRIES     5   /* Give up after 5 retransmissions          */
-#define TCP_RTX_BUF      2048  /* Max bytes saved for retransmission       */
+#define TCP_RTX_BUF      1460  /* One MSS segment for retransmission       */
+#define TCP_MSS          1460  /* Maximum segment size (Ethernet MTU - hdrs)*/
 
 /* TCP socket */
 typedef struct {
